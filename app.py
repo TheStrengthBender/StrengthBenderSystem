@@ -121,7 +121,8 @@ if uploaded_file is not None:
 
                     y_offset = 160
                     for r in rep_data:
-                        cv2.putText(summary_frame, f"REP {r['id']}: {r['duration']:.2fs} | {r['avg_v']:.2f} m/s", (40, y_offset), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+                        # FIXED LINE BELOW: moved 's' outside of the formatting bracket
+                        cv2.putText(summary_frame, f"REP {r['id']}: {r['duration']:.2f}s | {r['avg_v']:.2f} m/s", (40, y_offset), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
                         cv2.putText(summary_frame, f"PEAK: {r['peak_v']:.2f} m/s", (60, y_offset + 25), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 255, 255), 1)
                         y_offset += 70
 
