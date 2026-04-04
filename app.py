@@ -5,14 +5,12 @@ import numpy as np
 import tempfile
 from streamlit_image_coordinates import streamlit_image_coordinates
 
-# --- THE STRENGTH BENDER THEME ---
 st.set_page_config(page_title="TheStrengthBenderSystem", page_icon="🏋️", layout="wide")
 
 st.markdown("""
     <style>
     .stApp { background-color: #0E1117; color: #E0E0E0; }
     h1 { color: #E0E0E0 !important; font-family: 'Helvetica Neue', sans-serif; font-weight: 800; }
-    h3 { color: #FF4BAD !important; }
     .rep-card { background-color: #1A1C23; padding: 15px; border-radius: 10px; border-left: 5px solid #FF4BAD; margin-bottom: 10px; color: white; }
     </style>
     """, unsafe_allow_html=True)
@@ -59,78 +57,78 @@ if uploaded_file is not None:
                 if not ret: break
                 frame_res = cv2.resize(frame, (new_width, new_height))
                 success, box = tracker.update(frame_res)
-                if success:
-                    bx, by, bw, bh = [int(v) for v in box]
-                    y_history.append(by + (bh//2))
-                    bboxes.append((bx, by, bw, bh))
-                else:
-                    y_history.append(y_history[-1] if y_history else cy)
-                    bboxes.append(bboxes[-1] if bboxes else bbox)
+                bx, by, bw, bh = [int(v) for v in (box if success else bboxes[-1] if bboxes else bbox)]
+                y_history.append(by + (bh//2))
+                bboxes.append((bx, by, bw, bh))
                 all_frames.append(frame_res)
                 progress_bar.progress((i + 1) / total_frames)
 
-            # --- PRECISION MULTI-REP MATH ---
+            # --- MATH ENGINE ---
             smoothed_y = [np.mean(y_history[max(0, i-5):min(len(y_history), i+5)]) for i in range(len(y_history))]
             meters_per_pixel = 0.45 / bboxes[0][3]
             
             rep_starts = []
             for i in range(15, len(smoothed_y) - 15):
-                # Find local peaks (bottom of squat)
                 if smoothed_y[i] == max(smoothed_y[i-15:i+16]) and (smoothed_y[i] - min(smoothed_y)) > 30:
                     if not rep_starts or (i - rep_starts[-1]) > (fps * 1.0):
                         rep_starts.append(i)
 
             rep_data = []
             for r_idx, start in enumerate(rep_starts):
-                # Precision Lockout Detection (Sniper logic)
                 search_range = smoothed_y[start:min(start + int(fps * 3), len(smoothed_y))]
                 end = start
                 for j in range(5, len(search_range)):
                     if search_range[j] >= np.min(search_range[j-5:j]):
                         end = start + j - 5
                         break
-                
                 rep_y = y_history[start:end+1]
                 v_list = [abs(rep_y[k-1] - rep_y[k]) * meters_per_pixel * fps for k in range(1, len(rep_y))]
-                
                 if v_list:
                     rep_data.append({"id": r_idx+1, "start": start, "end": end, "avg_v": np.mean(v_list), "peak_v": max(v_list), "duration": (end-start)/fps})
 
-            # --- INTERFACE ---
-            col1, col2 = st.columns([3, 1])
-            with col2:
-                st.subheader("📊 Set Stats")
-                for r in rep_data:
-                    st.markdown(f'<div class="rep-card"><b>REP {r["id"]}</b><br>{r["avg_v"]:.2f} avg | {r["peak_v"]:.2f} peak<br>Time: {r["duration"]:.2f}s</div>', unsafe_allow_html=True)
+            # --- VIDEO BAKING ---
+            with st.spinner("Generating Final Pro-Clip..."):
+                out_frames = []
+                path_points = []
+                for i in range(len(all_frames)):
+                    frame_draw = all_frames[i].copy()
+                    bx, by, bw, bh = bboxes[i]
+                    active_rep = next((r for r in rep_data if r['start'] <= i <= r['end']), None)
+                    
+                    path_points.append((bx + bw//2, by + bh//2))
+                    if len(path_points) > 1:
+                        for j in range(max(1, i-90), len(path_points)):
+                            cv2.line(frame_draw, path_points[j-1], path_points[j], (255, 75, 173), 2, cv2.LINE_AA)
 
-            with col1:
-                with st.spinner("Baking Pro-Video..."):
-                    out_frames = []
-                    path_points = []
-                    for i in range(len(all_frames)):
-                        frame_draw = all_frames[i].copy()
-                        bx, by, bw, bh = bboxes[i]
-                        active_rep = next((r for r in rep_data if r['start'] <= i <= r['end']), None)
-                        
-                        # Maintain Bar Path
-                        path_points.append((bx + bw//2, by + bh//2))
-                        if len(path_points) > 1:
-                            for j in range(max(1, i-60), len(path_points)): # Show last 60 frames of path
-                                cv2.line(frame_draw, path_points[j-1], path_points[j], (255, 75, 173), 2, cv2.LINE_AA)
+                    # Overlay logic
+                    cv2.rectangle(frame_draw, (0, 0), (new_width, 80), (0, 0, 0), -1)
+                    if active_rep:
+                        elapsed = (i - active_rep['start']) / fps
+                        cv2.putText(frame_draw, f"REP {active_rep['id']} | {elapsed:.2f}s", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
+                        cv2.putText(frame_draw, f"VEL: {active_rep['avg_v']:.2f} m/s", (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+                    else:
+                        cv2.putText(frame_draw, "TheStrengthBenderSystem", (10, 45), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (150, 150, 150), 1)
+                    
+                    out_frames.append(cv2.cvtColor(frame_draw, cv2.COLOR_BGR2RGB))
 
-                        # Draw Box & Stats
-                        cv2.rectangle(frame_draw, (bx, by), (bx+bw, by+bh), (0, 255, 0), 2)
-                        cv2.rectangle(frame_draw, (0, 0), (new_width, 60), (0, 0, 0), -1)
-                        
-                        if active_rep:
-                            elapsed = (i - active_rep['start']) / fps
-                            cv2.putText(frame_draw, f"REP {active_rep['id']}: {elapsed:.2f}s", (10, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
-                            cv2.putText(frame_draw, f"VEL: {active_rep['avg_v']:.2f} m/s", (10, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
-                        else:
-                            cv2.putText(frame_draw, "TheStrengthBenderSystem", (10, 35), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1)
+                # --- GENERATE END CARD ---
+                if rep_data:
+                    # Create a black frame for the summary
+                    summary_frame = np.zeros((new_height, new_width, 3), dtype=np.uint8)
+                    cv2.putText(summary_frame, "THE STRENGTH BENDER", (40, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 75, 173), 2)
+                    cv2.putText(summary_frame, "SYSTEM STATS", (120, 90), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1)
+                    cv2.line(summary_frame, (40, 110), (new_width - 40, 110), (100, 100, 100), 1)
 
-                        out_frames.append(cv2.cvtColor(frame_draw, cv2.COLOR_BGR2RGB))
+                    y_offset = 160
+                    for r in rep_data:
+                        cv2.putText(summary_frame, f"REP {r['id']}: {r['duration']:.2fs} | {r['avg_v']:.2f} m/s", (40, y_offset), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+                        cv2.putText(summary_frame, f"PEAK: {r['peak_v']:.2f} m/s", (60, y_offset + 25), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 255, 255), 1)
+                        y_offset += 70
 
-                    final_path = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4').name
-                    imageio.mimsave(final_path, out_frames, fps=fps, format='FFMPEG', codec='libx264')
-                    st.video(final_path)
+                    # Add the summary frame for 3 seconds (fps * 3)
+                    for _ in range(int(fps * 3)):
+                        out_frames.append(summary_frame)
+
+                final_path = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4').name
+                imageio.mimsave(final_path, out_frames, fps=fps, format='FFMPEG', codec='libx264')
+                st.video(final_path)
