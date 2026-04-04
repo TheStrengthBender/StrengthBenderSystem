@@ -1,0 +1,6 @@
+streamlit
+opencv-contrib-python-headless
+streamlit-image-coordinates
+numpy
+imageio
+imageio-ffmpeg
