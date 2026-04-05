@@ -8,7 +8,6 @@ from streamlit_image_coordinates import streamlit_image_coordinates
 
 st.set_page_config(page_title="TheStrengthBenderSystem", page_icon="🏋️", layout="wide")
 
-# Custom CSS
 st.markdown("""
     <style>
     .stApp { background-color: #0E1117; color: #E0E0E0; }
@@ -43,10 +42,23 @@ if uploaded_file is not None:
         first_frame_res = cv2.resize(frame_rgb, (new_w, new_h))
 
         if not st.session_state.clicked:
-            st.markdown("### 🎯 Step 1: Click on the Barbell")
-            value = streamlit_image_coordinates(first_frame_res, key="clicker")
+            st.markdown("### 🎯 Step 1: Click the tip of the sleeve or the bar")
+            value = streamlit_image_coordinates(first_frame_res, key="clicker_v9")
             if value:
-                st.session_state.coords = (value['x'], value['y'])
+                # --- UNIVERSAL MAGNET (Contrast-Based) ---
+                gray = cv2.cvtColor(first_frame_res, cv2.COLOR_RGB2GRAY)
+                # Pull a 20x20 area around the click
+                y1, y2 = max(0, value['y']-10), min(new_h, value['y']+10)
+                x1, x2 = max(0, value['x']-10), min(new_w, value['x']+10)
+                roi = gray[y1:y2, x1:x2]
+                
+                # Use Sobel to find the sharpest edge (the barbell edge)
+                grad_x = cv2.Sobel(roi, cv2.CV_64F, 1, 0, ksize=3)
+                grad_y = cv2.Sobel(roi, cv2.CV_64F, 0, 1, ksize=3)
+                mag = cv2.magnitude(grad_x, grad_y)
+                _, _, _, max_loc = cv2.minMaxLoc(mag)
+                
+                st.session_state.coords = (x1 + max_loc[0], y1 + max_loc[1])
                 st.session_state.clicked = True
                 st.rerun()
 
@@ -54,7 +66,8 @@ if uploaded_file is not None:
             cx, cy = st.session_state.coords
             tracker = cv2.TrackerCSRT_create()
             first_frame_bgr = cv2.resize(first_frame, (new_w, new_h))
-            tracker.init(first_frame_bgr, (cx-25, cy-25, 50, 50))
+            # 40x40 box for high-precision tracking
+            tracker.init(first_frame_bgr, (cx-20, cy-20, 40, 40))
 
             y_hist, bboxes, frames = [], [], []
             cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
@@ -65,14 +78,13 @@ if uploaded_file is not None:
                 if not ret: break
                 f_res = cv2.resize(frame, (new_w, new_h))
                 ok, box = tracker.update(f_res)
-                bx, by, bw, bh = [int(v) for v in (box if ok else bboxes[-1] if bboxes else (cx-25, cy-25, 50, 50))]
+                bx, by, bw, bh = [int(v) for v in (box if ok else bboxes[-1] if bboxes else (cx-20, cy-20, 40, 40))]
                 y_hist.append(by + bh//2)
                 bboxes.append((bx, by, bw, bh))
                 frames.append(cv2.cvtColor(f_res, cv2.COLOR_BGR2RGB))
                 progress.progress((i + 1) / total_frames)
 
-            # --- THE "ANY-PULL" ENGINE ---
-            # Smoothed velocity instead of just position
+            # --- REP DETECTION ---
             m_per_px = 0.45 / bboxes[0][3]
             v_instant = [0]
             for i in range(1, len(y_hist)):
@@ -85,33 +97,28 @@ if uploaded_file is not None:
             start_f = 0
             
             for i, v in enumerate(v_smooth):
-                # Start tracking a rep if velocity > 0.1 m/s
-                if not is_moving and v > 0.1:
+                if not is_moving and v > 0.15:
                     is_moving = True
                     start_f = i
-                # Stop tracking if velocity hits 0 or negative
                 elif is_moving and v <= 0:
                     end_f = i
-                    duration = (end_f - start_f) / fps
-                    # Only count if rep is > 0.3s and moves > 10cm
                     dist = (y_hist[start_f] - y_hist[end_f]) * m_per_px
-                    if duration > 0.3 and dist > 0.10:
-                        rep_v = v_smooth[start_f:end_f+1]
+                    if dist > 0.30: # 30cm Rerack Filter
                         rep_data.append({
                             "id": len(rep_data)+1, 
                             "start": start_f, "end": end_f, 
-                            "avg_v": np.mean(rep_v), 
-                            "dur": duration
+                            "avg_v": np.mean(v_smooth[start_f:end_f+1]), 
+                            "dur": (end_f - start_f) / fps
                         })
                     is_moving = False
 
-            # --- DISPLAY ---
+            # --- OUTPUT ---
             c1, c2 = st.columns([3, 1])
             with c2:
                 st.subheader("📊 System Stats")
                 for r in rep_data:
                     st.markdown(f'<div class="rep-card"><b>REP {r["id"]}</b><br>{r["avg_v"]:.2f} m/s | {r["dur"]:.2f}s</div>', unsafe_allow_html=True)
-                if st.button("Reset"):
+                if st.button("Reset System"):
                     st.session_state.clicked = False
                     st.rerun()
 
@@ -131,7 +138,6 @@ if uploaded_file is not None:
                     cv2.putText(f, txt, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0,255,255), 2)
                     out_frames.append(f)
 
-                # End Card
                 if rep_data:
                     card = np.zeros((new_h, new_w, 3), dtype=np.uint8)
                     cv2.putText(card, "SYSTEM STATS", (80, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 75, 173), 2)
