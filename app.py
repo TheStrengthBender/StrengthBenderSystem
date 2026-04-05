@@ -21,11 +21,7 @@ st.markdown("""
     <style>
     .stApp { background-color: #1A1C20; color: #FFFFFF; font-family: 'Inter', sans-serif; }
     h1 { color: #FFFFFF !important; font-weight: 900; text-align: center; text-transform: uppercase; letter-spacing: 2px; margin-bottom: 0px;}
-    
-    /* Video Scaling Fix */
     .video-container { max-width: 500px; margin: 0 auto; border-radius: 12px; overflow: hidden; border: 2px solid #2D3139; }
-    
-    /* Tactical UI Elements */
     .rep-card { background-color: #2D3139; padding: 12px; border-radius: 8px; border-left: 4px solid #E63946; margin-bottom: 8px; font-size: 0.9em; }
     .form-card { background-color: #2D3139; padding: 12px; border-radius: 8px; border-left: 4px solid #8B949E; margin-bottom: 8px; }
     .stat-card-red { background-color: #2D3139; padding: 15px; border-radius: 8px; border-top: 4px solid #E63946; text-align: center; }
@@ -51,7 +47,7 @@ with tab1:
     with col_w: weight = st.number_input("Weight (lbs)", min_value=0.0, step=5.0)
 
     if not st.session_state.tracking_done:
-        uploaded_file = st.file_uploader("Upload Set", type=["mp4", "mov"], key=f_uploader_{st.session_state.uploader_key})
+        uploaded_file = st.file_uploader("Upload Set", type=["mp4", "mov"], key=f"uploader_{st.session_state.uploader_key}")
 
         if uploaded_file and weight > 0:
             tpath = os.path.join(tempfile.gettempdir(), "input.mp4")
@@ -88,7 +84,6 @@ with tab1:
                             cx, cy = bx + bw//2, by + bh//2
                             x_hist.append(cx); y_hist.append(cy); bboxes.append(box)
                             
-                            # Draw Grid & Path
                             cv2.line(frame, (int(st.session_state.coords[0]), 0), (int(st.session_state.coords[0]), h), (255, 255, 255), 1)
                             if len(x_hist) > 1:
                                 for j in range(1, len(x_hist)):
@@ -98,11 +93,9 @@ with tab1:
                         frames_out.append(cv2.cvtColor(cv2.resize(frame, (display_w, display_h)), cv2.COLOR_BGR2RGB))
                         progress.progress((i + 1) / total_frames)
                     
-                    # --- REP BY REP ANALYTICS ---
                     m_per_px = 0.45 / bboxes[0][3]
                     v_instant = [(y_hist[j-1]-y_hist[j])*m_per_px*fps if j>0 else 0 for j in range(len(y_hist))]
                     
-                    # Detect upward movements
                     reps_found = []
                     is_moving = False; start_idx = 0
                     for i, v in enumerate(v_instant):
@@ -125,8 +118,6 @@ with tab1:
 
     if st.session_state.tracking_done:
         res = st.session_state.rep_data
-        
-        # Centered, Scaled Video
         st.markdown('<div class="video-container">', unsafe_allow_html=True)
         st.video(res["video"])
         st.markdown('</div>', unsafe_allow_html=True)
@@ -136,15 +127,12 @@ with tab1:
             st.subheader("📊 Rep Stats")
             for idx, r in enumerate(res["reps"]):
                 st.markdown(f'<div class="rep-card"><b>REP {idx+1}:</b> {r["v"]} m/s | {r["dur"]}s</div>', unsafe_allow_html=True)
-            
             grade = "ELITE" if res["drift"] < 2 else "STABLE" if res["drift"] < 4 else "LEAKAGE"
             st.markdown(f'<div class="form-card">⚖️ <b>FORM: {grade}</b><br>Drift: {res["drift"]} in</div>', unsafe_allow_html=True)
 
         with col_res2:
             st.subheader("🎯 Tactical Adjuster")
             user_rpe = st.slider("Adjust Perceived RPE", 5.0, 10.0, float(res["ai_rpe"]), 0.5)
-            
-            # Real-time Recalculation
             effective_reps = len(res["reps"]) + (10.0 - user_rpe)
             adj_1rm = round(weight * (36 / (37 - effective_reps)), 1) if effective_reps < 37 else weight
             
