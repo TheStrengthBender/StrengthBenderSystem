@@ -16,7 +16,7 @@ st.markdown("""
     .rep-card { background-color: #161B22; padding: 12px; border-radius: 8px; border-left: 4px solid #FF4BAD; margin-bottom: 8px; color: white; }
     .form-card { background-color: #1E252D; padding: 12px; border-radius: 8px; border-left: 4px solid #00E5FF; margin-bottom: 8px; color: white; }
     .est-card { background-color: #2D241E; padding: 20px; border-radius: 10px; border-left: 5px solid #FFC107; margin-top: 15px; color: white; text-align: center; }
-    .rpe-card { background-color: #1c1f26; padding: 20px; border-radius: 10px; border-top: 4px solid #FF4BAD; margin-top: 10px; text-align: center; border-bottom: 1px solid #30363d; }
+    .rpe-card { background-color: #1c1f26; padding: 15px; border-radius: 10px; text-align: center; border-bottom: 1px solid #30363d; height: 100%; }
     .warning-text { color: #FFC107; font-weight: bold; font-size: 0.9em; text-align: center; margin-top: -10px; margin-bottom: 15px; }
     </style>
     """, unsafe_allow_html=True)
@@ -60,8 +60,7 @@ if not st.session_state.tracking_done:
         if ret:
             orig_h, orig_w = first_frame.shape[:2]
             
-            # --- THE TURBO DOWN-SCALER ---
-            # We track on a 640px wide frame instead of full 4K to make it lightning fast
+            # Turbo processing dimensions
             track_w = 640 
             track_h = int(track_w * (orig_h / orig_w))
             first_frame_track = cv2.resize(first_frame, (track_w, track_h))
@@ -71,7 +70,6 @@ if not st.session_state.tracking_done:
             frame_rgb = cv2.cvtColor(first_frame_track, cv2.COLOR_BGR2RGB)
             first_frame_res = cv2.resize(frame_rgb, (display_w, display_h))
             
-            # Scale ratio from the user's click (display) to the processing frame (track)
             click_to_track_ratio = track_w / display_w
             
             if not st.session_state.clicked:
@@ -87,13 +85,12 @@ if not st.session_state.tracking_done:
                     st.session_state.coords = (x1 + max_loc[0], y1 + max_loc[1]); st.session_state.clicked = True; st.rerun()
 
             if st.session_state.clicked:
-                # Map the click to the 640px tracking frame
                 cx, cy = st.session_state.coords
                 orig_cx = int(cx * click_to_track_ratio)
                 orig_cy = int(cy * click_to_track_ratio)
                 
                 tracker = cv2.TrackerCSRT_create()
-                box_size = int(40 * click_to_track_ratio) # Sniper Box scaled to track frame
+                box_size = int(40 * click_to_track_ratio) 
                 tracker.init(first_frame_track, (orig_cx - box_size//2, orig_cy - box_size//2, box_size, box_size))
                 
                 x_hist_orig, y_hist_orig, bboxes_orig, frames_display = [], [], [], []
@@ -107,7 +104,6 @@ if not st.session_state.tracking_done:
                     ret, raw_frame = cap.read()
                     if not ret: break
                     
-                    # Resize the frame for turbo tracking
                     frame = cv2.resize(raw_frame, (track_w, track_h))
                     ok, box = tracker.update(frame)
                     
@@ -120,7 +116,6 @@ if not st.session_state.tracking_done:
                     y_hist_orig.append(by + bh//2)
                     bboxes_orig.append((bx, by, bw, bh))
                     
-                    # Optimization: Only generate the display frame every 2 frames
                     if i % 2 == 0 or i == total_frames - 1:
                         frames_display.append(cv2.cvtColor(cv2.resize(frame, (display_w, display_h)), cv2.COLOR_BGR2RGB))
                     
@@ -130,7 +125,6 @@ if not st.session_state.tracking_done:
 
                 m_per_px = 0.45 / bboxes_orig[0][3]
                 
-                # Correcting FPS since we kept all tracker data but only saved half the visual frames
                 v_instant = [(y_hist_orig[j-1] - y_hist_orig[j]) * m_per_px * fps if j > 0 else 0 for j in range(len(y_hist_orig))]
                 v_smooth = [np.mean(v_instant[max(0, x-3):min(len(v_instant), x+3)]) for x in range(len(v_instant))]
                 
@@ -142,6 +136,7 @@ if not st.session_state.tracking_done:
                         dy = (y_hist_orig[start_f] - y_hist_orig[end_f]) * m_per_px 
                         dx = abs(x_hist_orig[start_f] - x_hist_orig[end_f]) * m_per_px 
                         
+                        # Unrack Filter (6 inches vertical, more vertical than horizontal)
                         if dy > 0.15 and dx < dy:
                             x_coords = x_hist_orig[start_f:end_f+1]
                             drift_m = (max(x_coords) - min(x_coords)) * m_per_px
@@ -152,7 +147,6 @@ if not st.session_state.tracking_done:
                 if rep_data and "Profiler" in tracking_mode: st.session_state.workout_log.append({"weight": st.session_state.last_weight, "velocity": max([r['avg_v'] for r in rep_data])})
 
                 path_pts_disp, out_frames = [], []
-                # Adjusting logic for frame skipping on output video
                 display_fps = fps / 2 
                 
                 for i, f in enumerate(frames_display):
@@ -198,6 +192,7 @@ if st.session_state.tracking_done:
                 grade = "ELITE" if drift_in < 2 else "STABLE" if drift_in < 4 else "LEAKAGE"
                 st.markdown(f'<div class="form-card">⚖️ <b>FORM GRADE: {grade}</b><br>Drift: {drift_in:.1f} inches</div>', unsafe_allow_html=True)
             
+            # --- AI RPE ESTIMATION ---
             v_list = [r['avg_v'] for r in st.session_state.rep_data]
             v_max = max(v_list)
             v_last = v_list[-1]
@@ -206,7 +201,7 @@ if st.session_state.tracking_done:
                 v_loss = (1 - (v_last / v_max)) * 100
                 multiplier = 0.10 
                 est_rpe = 5.5 + (v_loss * multiplier)
-                sub_text = f"{v_loss:.1f}% Velocity Loss"
+                sub_text = f"Velocity Loss: {v_loss:.1f}%"
             else:
                 if v_max >= 0.80: est_rpe = 6.0
                 elif v_max >= 0.65: est_rpe = 7.0
@@ -216,19 +211,41 @@ if st.session_state.tracking_done:
                 sub_text = "Single-Rep Proximity"
 
             final_rpe = min(10.0, round(est_rpe * 2) / 2)
-            st.markdown(f'<div class="rpe-card"><span style="color: #8B949E; font-size: 0.9em;">ESTIMATED INTENSITY</span><br><span style="font-size: 2.2em; font-weight: 800; color: white;">RPE {final_rpe}</span><br><span style="color: #FF4BAD; font-size: 0.8em;">{sub_text}</span></div>', unsafe_allow_html=True)
+            safe_rpe = max(5.0, min(10.0, final_rpe))
 
+            # --- AI BRZYCKI CALCULATION ---
+            reps_performed = len(st.session_state.rep_data)
+            ai_rir = 10.0 - final_rpe
+            ai_effective_reps = reps_performed + ai_rir
+            
+            if ai_effective_reps <= 1.0:
+                ai_1rm = st.session_state.last_weight
+            else:
+                ai_1rm = st.session_state.last_weight * (36.0 / (37.0 - ai_effective_reps))
+
+            # UI: Side-by-Side AI Cards
+            rc1, rc2 = st.columns(2)
+            with rc1:
+                st.markdown(f'<div class="rpe-card" style="border-top: 4px solid #FF4BAD;"><span style="color: #8B949E; font-size: 0.8em; font-weight: bold;">AI RPE</span><br><span style="font-size: 2.2em; font-weight: 800; color: white;">{final_rpe}</span><br><span style="color: #FF4BAD; font-size: 0.75em;">{sub_text}</span></div>', unsafe_allow_html=True)
+            with rc2:
+                st.markdown(f'<div class="rpe-card" style="border-top: 4px solid #00E5FF;"><span style="color: #8B949E; font-size: 0.8em; font-weight: bold;">AI 1RM EST</span><br><span style="font-size: 2.2em; font-weight: 800; color: #00E5FF;">{ai_1rm:.1f}</span><br><span style="color: #8B949E; font-size: 0.75em;">Brzycki Hybrid</span></div>', unsafe_allow_html=True)
+
+            # --- MANUAL OVERRIDE ---
             if st.session_state.last_weight > 0 and "Quick" in tracking_mode:
-                v = v_max
-                if v >= 1.0: est_pct = 0.50
-                elif v >= 0.85: est_pct = 0.60
-                elif v >= 0.70: est_pct = 0.70
-                elif v >= 0.55: est_pct = 0.80
-                elif v >= 0.40: est_pct = 0.85
-                elif v >= 0.30: est_pct = 0.90
-                elif v >= 0.20: est_pct = 0.95
-                else: est_pct = 1.0
+                st.markdown("<br>", unsafe_allow_html=True)
+                st.markdown("### 🎛️ Manual Override")
+                st.caption("Did the set feel heavier or lighter? Adjust the RPE below to recalculate your true max.")
                 
-                final_pct = max(0.35, min(est_pct, 1.0))
-                est_1rm = st.session_state.last_weight / final_pct
-                st.markdown(f'<div class="est-card">🟡 <b>1RM EST.</b><br><span style="font-size: 2.2em; color: #FFC107;">{est_1rm:.1f}</span></div>', unsafe_allow_html=True)
+                user_rpe = st.slider("Your Perceived RPE:", min_value=5.0, max_value=10.0, value=float(safe_rpe), step=0.5)
+                
+                # Only show the adjusted card if the user moves the slider away from the AI's guess
+                if user_rpe != final_rpe:
+                    user_rir = 10.0 - user_rpe
+                    user_effective_reps = reps_performed + user_rir
+                    
+                    if user_effective_reps <= 1.0:
+                        user_1rm = st.session_state.last_weight
+                    else:
+                        user_1rm = st.session_state.last_weight * (36.0 / (37.0 - user_effective_reps))
+                    
+                    st.markdown(f'<div class="est-card" style="border-left: 5px solid #FFC107; background-color: #2D241E;"><span style="color: #8B949E; font-size: 0.9em;">YOUR ADJUSTED 1RM</span><br><span style="font-size: 2.6em; color: #FFC107; font-weight: 900;">{user_1rm:.1f} lbs</span></div>', unsafe_allow_html=True)
