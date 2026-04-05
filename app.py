@@ -4,7 +4,6 @@ import imageio
 import numpy as np
 import tempfile
 import os
-import pandas as pd
 from datetime import datetime
 from supabase import create_client, Client
 from streamlit_image_coordinates import streamlit_image_coordinates
@@ -16,29 +15,31 @@ supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 st.set_page_config(page_title="IRON SIGHT", page_icon="🎯", layout="wide")
 
-# --- CSS: FIXED SCALING & THEME ---
+# --- UI REFINEMENT: THE "CLEAN LOOK" ---
 st.markdown("""
     <style>
-    .stApp { background-color: #1A1C20; color: #FFFFFF; font-family: 'Inter', sans-serif; }
-    h1 { color: #FFFFFF !important; font-weight: 900; text-align: center; text-transform: uppercase; letter-spacing: 2px; margin-bottom: 0px;}
-    .video-container { max-width: 500px; margin: 0 auto; border-radius: 12px; overflow: hidden; border: 2px solid #2D3139; }
-    .rep-card { background-color: #2D3139; padding: 12px; border-radius: 8px; border-left: 4px solid #E63946; margin-bottom: 8px; font-size: 0.9em; }
-    .form-card { background-color: #2D3139; padding: 12px; border-radius: 8px; border-left: 4px solid #8B949E; margin-bottom: 8px; }
-    .stat-card-red { background-color: #2D3139; padding: 15px; border-radius: 8px; border-top: 4px solid #E63946; text-align: center; }
-    .stat-card-green { background-color: #2D3139; padding: 15px; border-radius: 8px; border-top: 4px solid #00FF00; text-align: center; }
-    .adj-card-gold { background-color: #2D3139; padding: 15px; border-radius: 8px; border-left: 5px solid #FFC107; text-align: center; margin-top: 10px; }
+    .stApp { background-color: #111111; color: #FFFFFF; font-family: 'Inter', sans-serif; }
+    h1 { font-weight: 900; text-align: center; text-transform: uppercase; letter-spacing: -1px; margin-bottom: 0px;}
+    .video-container { max-width: 500px; margin: 0 auto; border-radius: 15px; overflow: hidden; border: 1px solid #333; }
+    
+    .card { background-color: #1A1A1A; border: 1px solid #333; padding: 20px; border-radius: 12px; margin-bottom: 10px; }
+    .stat-label { color: #888; font-size: 0.8em; text-transform: uppercase; font-weight: 700; display: block; margin-bottom: 5px; }
+    .stat-value { font-size: 2.2em; font-weight: 900; color: #FFFFFF; }
+    
+    .rep-strip { border-left: 4px solid #FF1E56; padding-left: 15px; margin-bottom: 15px; }
+    .form-strip { border-left: 4px solid #00D2FF; padding-left: 15px; margin-bottom: 15px; }
     </style>
     """, unsafe_allow_html=True)
 
 st.markdown("<h1>IRON SIGHT</h1>", unsafe_allow_html=True)
-st.markdown("<p style='text-align: center; color: #8B949E; margin-bottom: 20px; letter-spacing: 2px; font-size: 0.8em;'>TACTICAL VELOCITY TRACKER</p>", unsafe_allow_html=True)
+st.markdown("<p style='text-align: center; color: #555; margin-bottom: 25px;'>TACTICAL VELOCITY TRACKER</p>", unsafe_allow_html=True)
 
 # --- STATE ---
 if 'clicked' not in st.session_state: st.session_state.clicked = False
 if 'tracking_done' not in st.session_state: st.session_state.tracking_done = False
 if 'uploader_key' not in st.session_state: st.session_state.uploader_key = 0
 
-EXERCISES = ["Squat", "Bench Press", "Deadlift", "Overhead Press", "Barbell Row"]
+EXERCISES = ["Deadlift", "Squat", "Bench Press", "Overhead Press"]
 tab1, tab2 = st.tabs(["⚡ LIVE TRACK", "🗄️ TACTICAL ARCHIVE"])
 
 with tab1:
@@ -53,12 +54,14 @@ with tab1:
             tpath = os.path.join(tempfile.gettempdir(), "input.mp4")
             with open(tpath, "wb") as f: f.write(uploaded_file.read())
             cap = cv2.VideoCapture(tpath)
-            fps = cap.get(cv2.CAP_PROP_FPS); total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+            fps = cap.get(cv2.CAP_PROP_FPS)
+            total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
             ret, first_frame = cap.read()
             
             if ret:
                 h, w = first_frame.shape[:2]
-                display_w = 480; display_h = int(display_w * (h / w))
+                display_w = 480
+                display_h = int(display_w * (h / w))
                 first_frame_res = cv2.resize(first_frame, (display_w, display_h))
                 
                 if not st.session_state.clicked:
@@ -80,30 +83,32 @@ with tab1:
                         if not ret: break
                         ok, box = tracker.update(frame)
                         if ok:
-                            bx, by, bw, bh = [int(v) for v in box]
-                            cx, cy = bx + bw//2, by + bh//2
-                            x_hist.append(cx); y_hist.append(cy); bboxes.append(box)
-                            
-                            cv2.line(frame, (int(st.session_state.coords[0]), 0), (int(st.session_state.coords[0]), h), (255, 255, 255), 1)
+                            x_hist.append(box[0]+box[2]/2); y_hist.append(box[1]+box[3]/2); bboxes.append(box)
+                            # Draw path & center line
+                            cv2.line(frame, (int(st.session_state.coords[0]), 0), (int(st.session_state.coords[0]), h), (100, 100, 100), 1)
                             if len(x_hist) > 1:
                                 for j in range(1, len(x_hist)):
-                                    color = (0, 255, 0) if y_hist[j] < y_hist[j-1] else (255, 255, 255)
-                                    cv2.line(frame, (x_hist[j-1], y_hist[j-1]), (x_hist[j], y_hist[j]), color, 3)
+                                    cv2.line(frame, (int(x_hist[j-1]), int(y_hist[j-1])), (int(x_hist[j]), int(y_hist[j])), (0, 255, 0), 2)
                         
                         frames_out.append(cv2.cvtColor(cv2.resize(frame, (display_w, display_h)), cv2.COLOR_BGR2RGB))
                         progress.progress((i + 1) / total_frames)
                     
+                    # --- NOISE-FILTERING REP LOGIC ---
                     m_per_px = 0.45 / bboxes[0][3]
                     v_instant = [(y_hist[j-1]-y_hist[j])*m_per_px*fps if j>0 else 0 for j in range(len(y_hist))]
                     
                     reps_found = []
                     is_moving = False; start_idx = 0
                     for i, v in enumerate(v_instant):
-                        if not is_moving and v > 0.1: is_moving, start_idx = True, i
+                        # Filter: Must be moving faster than 0.15 m/s to count as a rep
+                        if not is_moving and v > 0.15: 
+                            is_moving, start_idx = True, i
                         elif is_moving and v < 0:
                             duration = (i - start_idx) / fps
-                            if duration > 0.3:
-                                reps_found.append({"v": round(np.mean(v_instant[start_idx:i]), 2), "dur": round(duration, 2)})
+                            # Filter: Rep must last at least 0.4 seconds (removes bounces/drops)
+                            if duration > 0.4:
+                                rep_v = np.mean(v_instant[start_idx:i])
+                                reps_found.append({"v": round(rep_v, 2), "dur": round(duration, 2)})
                             is_moving = False
 
                     drift_in = round((max(x_hist) - min(x_hist)) * m_per_px * 39.37, 1)
@@ -122,38 +127,33 @@ with tab1:
         st.video(res["video"])
         st.markdown('</div>', unsafe_allow_html=True)
         
-        col_res1, col_res2 = st.columns([1, 1])
-        with col_res1:
-            st.subheader("📊 Rep Stats")
-            for idx, r in enumerate(res["reps"]):
-                st.markdown(f'<div class="rep-card"><b>REP {idx+1}:</b> {r["v"]} m/s | {r["dur"]}s</div>', unsafe_allow_html=True)
-            grade = "ELITE" if res["drift"] < 2 else "STABLE" if res["drift"] < 4 else "LEAKAGE"
-            st.markdown(f'<div class="form-card">⚖️ <b>FORM: {grade}</b><br>Drift: {res["drift"]} in</div>', unsafe_allow_html=True)
+        # --- CLEAN PERFORMANCE DATA VIEW ---
+        st.markdown("### 📊 Performance Data")
+        for idx, r in enumerate(res["reps"]):
+            st.markdown(f'<div class="card rep-strip"><span class="stat-label">REP {idx+1}</span><span style="font-size:1.2em; font-weight:700;">{r["v"]} m/s | {r["dur"]}s</span></div>', unsafe_allow_html=True)
+        
+        grade = "STABLE" if res["drift"] < 4 else "LEAKAGE"
+        st.markdown(f'<div class="card form-strip"><span class="stat-label">FORM GRADE: {grade}</span><span style="font-size:1.2em; font-weight:700;">Drift: {res["drift"]} inches</span></div>', unsafe_allow_html=True)
 
-        with col_res2:
-            st.subheader("🎯 Tactical Adjuster")
-            user_rpe = st.slider("Adjust Perceived RPE", 5.0, 10.0, float(res["ai_rpe"]), 0.5)
-            effective_reps = len(res["reps"]) + (10.0 - user_rpe)
-            adj_1rm = round(weight * (36 / (37 - effective_reps)), 1) if effective_reps < 37 else weight
-            
-            st.markdown(f'<div class="stat-card-red">AI SUGGESTED RPE<br><h3>{res["ai_rpe"]}</h3></div>', unsafe_allow_html=True)
-            st.markdown(f'<div class="adj-card-gold"><span style="font-size:0.8em; color:#8B949E;">ADJUSTED 1RM</span><br><span style="font-size:2.2em; font-weight:900; color:#FFC107;">{adj_1rm} lbs</span></div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="card" style="border-top: 4px solid #FF1E56; text-align: center;"><span class="stat-label">AI RPE</span><div class="stat-value">{res["ai_rpe"]}</div><span style="color:#555; font-size:0.7em;">Single-Rep Proximity</span></div>', unsafe_allow_html=True)
+        
+        # Adjustable Section
+        user_rpe = st.slider("Manual Override", 5.0, 10.0, float(res["ai_rpe"]), 0.5)
+        rir = 10.0 - user_rpe
+        adj_1rm = round(weight * (36 / (37 - (1 + rir))), 1)
+        
+        st.markdown(f'<div class="card" style="border-top: 4px solid #00D2FF; text-align: center;"><span class="stat-label">AI 1RM EST</span><div class="stat-value" style="color:#00D2FF;">{adj_1rm}</div><span style="color:#555; font-size:0.7em;">Brzycki Hybrid</span></div>', unsafe_allow_html=True)
 
-        if st.button("💾 SAVE TO CLOUD ARCHIVE", use_container_width=True):
+        if st.button("💾 SAVE TO VAULT", use_container_width=True):
             supabase.table("lifts").insert({"exercise": exercise, "weight": weight, "reps": len(res["reps"]), "rpe": user_rpe, "est_1rm": adj_1rm}).execute()
-            st.success("Set Locked."); st.session_state.tracking_done = False; st.session_state.clicked = False; st.session_state.uploader_key += 1; st.rerun()
+            st.success("Set Archived."); st.session_state.tracking_done = False; st.session_state.clicked = False; st.session_state.uploader_key += 1; st.rerun()
 
 with tab2:
     st.subheader("🗄️ TACTICAL ARCHIVE")
     logs = supabase.table("lifts").select("*").order("created_at", desc=True).execute()
     if logs.data:
         for row in logs.data:
-            with st.container():
-                c1, c2, c3, c4 = st.columns([1.5, 1, 1, 1])
-                with c1: st.write(f"🏋️ **{row['exercise']}**")
-                with c2: st.write(f"{row['weight']} lbs x {row['reps']}")
-                with c3: st.write(f"🔥 RPE {row['rpe']}")
-                with c4: st.write(f"🎯 **{row['est_1rm']}**")
-                st.markdown("---")
+            st.markdown(f"**{row['exercise']}**: {row['weight']} lbs x {row['reps']} | RPE {row['rpe']} | 1RM {row['est_1rm']}")
+            st.markdown("---")
 
-st.markdown('<div style="position: fixed; bottom: 15px; right: 20px; color: #595959; font-size: 0.75em; font-weight: 800; z-index: 100;">BY THE STRENGTHBENDER</div>', unsafe_allow_html=True)
+st.markdown('<div style="position: fixed; bottom: 15px; right: 20px; color: #333; font-size: 0.7em; font-weight: 800;">BY THE STRENGTHBENDER</div>', unsafe_allow_html=True)
