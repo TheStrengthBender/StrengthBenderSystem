@@ -35,8 +35,10 @@ with st.sidebar:
         help="Explosive: High speed on warmups, sharp drop-off. Grinder: Constant speed, slow but strong."
     )
     
-    # Map profile to math coefficients (Higher = Faster %1RM drop per m/s)
-    sensitivity_map = {"Grinder": 0.35, "Standard": 0.50, "Explosive": 0.85}
+    # --- SWAPPED VALUES FOR CORRECT LOGIC ---
+    # Explosive (High Sensitivity) = Higher drop in %1RM per m/s = Lower 1RM Estimate
+    # Grinder (Low Sensitivity) = Lower drop in %1RM per m/s = Higher 1RM Estimate
+    sensitivity_map = {"Grinder": 0.35, "Standard": 0.55, "Explosive": 0.95}
     SENSITIVITY = sensitivity_map[profile]
 
 # --- SESSION STATE ---
@@ -140,6 +142,7 @@ if st.session_state.tracking_done:
             best_v = max([r['avg_v'] for r in st.session_state.rep_data])
             # CORRECTED MATH LOGIC
             velocity_reserve = max(0, best_v - 0.30)
+            # Higher SENSITIVITY now properly results in lower est_pct, making 1RM lower (conservative)
             est_pct = 1.0 - (velocity_reserve * SENSITIVITY)
             est_pct = max(0.35, est_pct)
             est_1rm = st.session_state.last_weight / est_pct
