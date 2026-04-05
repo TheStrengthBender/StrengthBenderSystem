@@ -13,15 +13,16 @@ st.markdown("""
     <style>
     .stApp { background-color: #0E1117; color: #E0E0E0; }
     h1 { color: #E0E0E0 !important; font-family: 'Helvetica Neue', sans-serif; font-weight: 800; font-size: clamp(1.5rem, 5vw, 2.5rem) !important; word-break: keep-all !important; }
-    .rep-card { background-color: #1A1C23; padding: 15px; border-radius: 10px; border-left: 5px solid #FF4BAD; margin-bottom: 10px; color: white; }
-    .form-card { background-color: #1E252D; padding: 15px; border-radius: 10px; border-left: 5px solid #00E5FF; margin-top: 10px; color: white; }
+    .rep-card { background-color: #161B22; padding: 12px; border-radius: 8px; border-left: 4px solid #FF4BAD; margin-bottom: 8px; color: white; }
+    .form-card { background-color: #1E252D; padding: 12px; border-radius: 8px; border-left: 4px solid #00E5FF; margin-bottom: 8px; color: white; }
     .est-card { background-color: #2D241E; padding: 20px; border-radius: 10px; border-left: 5px solid #FFC107; margin-top: 15px; color: white; text-align: center; }
+    .rpe-card { background-color: #1c1f26; padding: 20px; border-radius: 10px; border-top: 4px solid #FF4BAD; margin-top: 10px; text-align: center; border-bottom: 1px solid #30363d; }
     </style>
     """, unsafe_allow_html=True)
 
 st.title("🏋️ TheStrengthBenderSystem")
 
-# --- SIDEBAR & STATE ---
+# --- INITIALIZE STATE ---
 if 'clicked' not in st.session_state: st.session_state.clicked = False
 if 'tracking_done' not in st.session_state: st.session_state.tracking_done = False
 if 'workout_log' not in st.session_state: st.session_state.workout_log = []
@@ -34,8 +35,9 @@ with st.sidebar:
     st.subheader("👤 Lifter Profile")
     profile = st.select_slider("Select your 'Feel':", options=["Grinder", "Standard", "Explosive"], value="Standard")
     
-    # Profile Adjustments (Percentage Shifts)
-    adj_map = {"Explosive": -0.10, "Standard": 0.0, "Grinder": 0.10}
+    # Profile shifts for 1RM and RPE calculations
+    # Negative shift = Conservative (Explosive), Positive = Aggressive (Grinder)
+    adj_map = {"Explosive": -0.10, "Standard": 0.0, "Grinder": 0.08}
     SHIFT = adj_map[profile]
 
 # --- UPLOAD PHASE ---
@@ -109,7 +111,7 @@ if not st.session_state.tracking_done:
                     if active:
                         cv2.line(f, (path_pts_disp[active['start']][0], 0), (path_pts_disp[active['start']][0], f.shape[0]), (255,255,255), 1, cv2.LINE_AA)
                         cv2.rectangle(f, (0,0), (display_w, 50), (0,0,0), -1)
-                        cv2.putText(f, f"REP {active['id']} | DRIFT: {active['drift']*39.37:.1f}in", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0,229,255), 2)
+                        cv2.putText(f, f"REP {active['id']} | {(i-active['start'])/fps:.2f}s", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0,255,255), 2)
                     out_frames.append(f)
 
                 final_p = os.path.join(tempfile.gettempdir(), "out.mp4"); imageio.mimsave(final_p, out_frames, fps=fps, codec='libx264')
@@ -120,18 +122,46 @@ if st.session_state.tracking_done:
     c1, c2 = st.columns([2, 1.5])
     with c1:
         st.video(st.session_state.final_vid_path)
-        if st.button("➕ Track Next Set"): st.session_state.clicked = False; st.session_state.tracking_done = False; st.rerun()
+        if st.button("🔄 Track New Set"): st.session_state.clicked = False; st.session_state.tracking_done = False; st.rerun()
     with c2:
         st.subheader("📊 Performance Data")
         for r in st.session_state.rep_data:
             st.markdown(f'<div class="rep-card"><b>REP {r["id"]}</b><br>{r["avg_v"]:.2f} m/s | {r["dur"]:.2f}s</div>', unsafe_allow_html=True)
             drift_in = r['drift'] * 39.37
             grade = "ELITE" if drift_in < 2 else "STABLE" if drift_in < 4 else "LEAKAGE"
-            st.markdown(f'<div class="form-card">⚖️ <b>FORM GRADE: {grade}</b><br>Horizontal Drift: {drift_in:.1f} inches</div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="form-card">⚖️ <b>FORM GRADE: {grade}</b><br>Drift: {drift_in:.1f} inches</div>', unsafe_allow_html=True)
         
+        # --- RPE ENGINE ---
+        if st.session_state.rep_data:
+            v_list = [r['avg_v'] for r in st.session_state.rep_data]
+            v_max = max(v_list)
+            v_last = v_list[-1]
+            
+            # Case 1: Multi-Rep Set (Velocity Loss Method)
+            if len(st.session_state.rep_data) > 1:
+                v_loss = (1 - (v_last / v_max)) * 100
+                multiplier = 0.12 if profile == "Explosive" else 0.10 if profile == "Standard" else 0.08
+                est_rpe = 5.5 + (v_loss * multiplier)
+                sub_text = f"{v_loss:.1f}% Velocity Loss"
+            
+            # Case 2: Single Rep (Proximity to MVT Method)
+            else:
+                # Map speed to RPE based on typical proximity to failure
+                if v_max >= 0.80: est_rpe = 6.0
+                elif v_max >= 0.65: est_rpe = 7.0
+                elif v_max >= 0.50: est_rpe = 8.0
+                elif v_max >= 0.40: est_rpe = 9.0
+                else: est_rpe = 10.0
+                # Shift based on profile (Explosive lifters feel heavy weight as higher RPE)
+                est_rpe -= (SHIFT * 10)
+                sub_text = "Single-Rep Proximity"
+
+            final_rpe = min(10.0, round(est_rpe * 2) / 2)
+            st.markdown(f'<div class="rpe-card"><span style="color: #8B949E; font-size: 0.9em;">ESTIMATED INTENSITY</span><br><span style="font-size: 2.2em; font-weight: 800; color: white;">RPE {final_rpe}</span><br><span style="color: #FF4BAD; font-size: 0.8em;">{sub_text}</span></div>', unsafe_allow_html=True)
+
+        # --- 1RM ESTIMATE ---
         if st.session_state.last_weight > 0 and "Quick" in tracking_mode:
-            v = max([r['avg_v'] for r in st.session_state.rep_data])
-            # Lookup Map (Badillo Study Base)
+            v = v_max
             if v >= 1.0: est_pct = 0.58
             elif v >= 0.85: est_pct = 0.65
             elif v >= 0.70: est_pct = 0.75
@@ -140,8 +170,6 @@ if st.session_state.tracking_done:
             elif v >= 0.35: est_pct = 0.95
             else: est_pct = 1.0
             
-            # Use SHIFT correctly - Explosive lifters are at a LOWER % of max at high speeds
             final_pct = max(0.40, min(est_pct + SHIFT, 1.0))
             est_1rm = st.session_state.last_weight / final_pct
-            
             st.markdown(f'<div class="est-card">🟡 <b>{profile.upper()} 1RM EST.</b><br><span style="font-size: 2.2em; color: #FFC107;">{est_1rm:.1f}</span></div>', unsafe_allow_html=True)
