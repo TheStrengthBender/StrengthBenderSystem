@@ -21,45 +21,33 @@ st.markdown("""
 
 st.title("🏋️ TheStrengthBenderSystem")
 
-# --- SIDEBAR CONFIGURATION ---
 with st.sidebar:
     st.header("⚙️ App Settings")
     tracking_mode = st.radio("Mode:", ["⚡ Quick Track", "📈 1RM Profiler"])
-    
     st.markdown("---")
     st.subheader("👤 Lifter Profile")
-    profile = st.select_slider(
-        "Select your 'Feel':",
-        options=["Grinder", "Standard", "Explosive"],
-        value="Standard",
-        help="Explosive: High speed on warmups, sharp drop-off. Grinder: Constant speed, slow but strong."
-    )
+    profile = st.select_slider("Select your 'Feel':", options=["Grinder", "Standard", "Explosive"], value="Standard")
     
-    # --- SWAPPED VALUES FOR CORRECT LOGIC ---
-    # Explosive (High Sensitivity) = Higher drop in %1RM per m/s = Lower 1RM Estimate
-    # Grinder (Low Sensitivity) = Lower drop in %1RM per m/s = Higher 1RM Estimate
-    sensitivity_map = {"Grinder": 0.35, "Standard": 0.55, "Explosive": 0.95}
-    SENSITIVITY = sensitivity_map[profile]
+    # Profile Adjustments (Percentage Shifts)
+    # Explosive lifters are USUALLY at a lower % of max at high speeds
+    adj_map = {"Explosive": -0.07, "Standard": 0.0, "Grinder": 0.07}
+    SHIFT = adj_map[profile]
 
-# --- SESSION STATE ---
 if 'clicked' not in st.session_state: st.session_state.clicked = False
 if 'tracking_done' not in st.session_state: st.session_state.tracking_done = False
 if 'workout_log' not in st.session_state: st.session_state.workout_log = []
 
-# --- UPLOAD PHASE ---
 if not st.session_state.tracking_done:
     col_w, col_u = st.columns([1, 2])
     with col_w:
-        label = "Weight (Optional)" if "Quick" in tracking_mode else "Weight (Required)"
-        weight_lifted = st.number_input(label, min_value=0.0, value=0.0, step=5.0)
+        weight_lifted = st.number_input("Weight (Optional for Quick)", min_value=0.0, value=0.0, step=5.0)
     with col_u:
         uploaded_file = st.file_uploader("Upload MP4 or MOV", type=["mp4", "mov"])
 
     if uploaded_file and (weight_lifted > 0 or "Quick" in tracking_mode):
         tpath = os.path.join(tempfile.gettempdir(), "input.mp4")
         with open(tpath, "wb") as f: f.write(uploaded_file.read())
-        cap = cv2.VideoCapture(tpath); fps = cap.get(cv2.CAP_PROP_FPS)
-        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        cap = cv2.VideoCapture(tpath); fps = cap.get(cv2.CAP_PROP_FPS); total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
         ret, first_frame = cap.read()
         if ret:
             orig_h, orig_w = first_frame.shape[:2]; display_w = 400; scale_factor = orig_w / display_w
@@ -124,7 +112,6 @@ if not st.session_state.tracking_done:
                 final_p = os.path.join(tempfile.gettempdir(), "out.mp4"); imageio.mimsave(final_p, out_frames, fps=fps, codec='libx264')
                 st.session_state.rep_data, st.session_state.final_vid_path, st.session_state.last_weight, st.session_state.tracking_done = rep_data, final_p, weight_lifted, True; st.rerun()
 
-# --- DASHBOARD PHASE ---
 if st.session_state.tracking_done:
     c1, c2 = st.columns([2, 1.5])
     with c1:
@@ -138,12 +125,20 @@ if st.session_state.tracking_done:
             grade = "ELITE" if drift_in < 2 else "STABLE" if drift_in < 4 else "LEAKAGE"
             st.markdown(f'<div class="form-card">⚖️ <b>FORM GRADE: {grade}</b><br>Horizontal Drift: {drift_in:.1f} inches</div>', unsafe_allow_html=True)
         
-        if st.session_state.last_weight > 0 and "Quick" in tracking_mode:
-            best_v = max([r['avg_v'] for r in st.session_state.rep_data])
-            # CORRECTED MATH LOGIC
-            velocity_reserve = max(0, best_v - 0.30)
-            # Higher SENSITIVITY now properly results in lower est_pct, making 1RM lower (conservative)
-            est_pct = 1.0 - (velocity_reserve * SENSITIVITY)
-            est_pct = max(0.35, est_pct)
-            est_1rm = st.session_state.last_weight / est_pct
+        if weight_lifted > 0 and "Quick" in tracking_mode:
+            v = max([r['avg_v'] for r in st.session_state.rep_data])
+            
+            # SCIENTIFIC CURVE MAPPING (Lookup table)
+            if v >= 1.0: est_pct = 0.60
+            elif v >= 0.85: est_pct = 0.70
+            elif v >= 0.70: est_pct = 0.75
+            elif v >= 0.55: est_pct = 0.82
+            elif v >= 0.45: est_pct = 0.90
+            elif v >= 0.35: est_pct = 0.95
+            else: est_pct = 1.0
+            
+            # Apply Lifter Profile Shift
+            est_pct = max(0.40, min(est_pct + SHIFT, 1.0))
+            est_1rm = weight_lifted / est_pct
+            
             st.markdown(f'<div class="est-card">🟡 <b>{profile.upper()} 1RM EST.</b><br><span style="font-size: 2.2em; color: #FFC107;">{est_1rm:.1f}</span></div>', unsafe_allow_html=True)
