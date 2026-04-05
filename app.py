@@ -35,8 +35,9 @@ with st.sidebar:
     st.subheader("👤 Lifter Profile")
     profile = st.select_slider("Select your 'Feel':", options=["Grinder", "Standard", "Explosive"], value="Standard")
     
-    # Profile shifts for 1RM and RPE calculations
-    adj_map = {"Explosive": -0.10, "Standard": 0.0, "Grinder": 0.08}
+    # RECALIBRATED SHIFTS: 
+    # Explosive -0.15 allows for much higher 1RM estimates at low speeds.
+    adj_map = {"Explosive": -0.15, "Standard": 0.0, "Grinder": 0.05}
     SHIFT = adj_map[profile]
 
 # --- UPLOAD PHASE ---
@@ -73,23 +74,19 @@ if not st.session_state.tracking_done:
                 cx, cy = st.session_state.coords; tracker = cv2.TrackerCSRT_create()
                 orig_cx, orig_cy = int(cx * scale_factor), int(cy * scale_factor)
                 
-                # Robust Box Size for high-impact lifts
                 box_size = int(70 * scale_factor)
                 tracker.init(first_frame, (orig_cx - box_size//2, orig_cy - box_size//2, box_size, box_size))
                 
                 x_hist_orig, y_hist_orig, bboxes_orig, frames_display = [], [], [], []
                 cap.set(cv2.CAP_PROP_POS_FRAMES, 0); progress = st.progress(0)
                 
-                # Tracking Loop with Lazarus Logic
                 for i in range(total_frames):
                     ret, frame = cap.read()
                     if not ret: break
                     ok, box = tracker.update(frame)
-                    
                     if ok:
                         bx, by, bw, bh = [int(v) for v in box]
                     else:
-                        # Hold position if tracking is lost (impact blur)
                         bx, by, bw, bh = bboxes_orig[-1] if bboxes_orig else (orig_cx - box_size//2, orig_cy - box_size//2, box_size, box_size)
                     
                     x_hist_orig.append(bx + bw//2); y_hist_orig.append(by + bh//2); bboxes_orig.append((bx, by, bw, bh))
@@ -168,17 +165,18 @@ if st.session_state.tracking_done:
             final_rpe = min(10.0, round(est_rpe * 2) / 2)
             st.markdown(f'<div class="rpe-card"><span style="color: #8B949E; font-size: 0.9em;">ESTIMATED INTENSITY</span><br><span style="font-size: 2.2em; font-weight: 800; color: white;">RPE {final_rpe}</span><br><span style="color: #FF4BAD; font-size: 0.8em;">{sub_text}</span></div>', unsafe_allow_html=True)
 
-        # --- 1RM ESTIMATE (SCIENTIFIC TABLE) ---
+        # --- REFINED 1RM SCIENTIFIC TABLE (v19) ---
         if st.session_state.last_weight > 0 and "Quick" in tracking_mode:
             v = v_max
-            if v >= 1.0: est_pct = 0.58
-            elif v >= 0.85: est_pct = 0.65
-            elif v >= 0.70: est_pct = 0.75
-            elif v >= 0.55: est_pct = 0.82
-            elif v >= 0.45: est_pct = 0.90
-            elif v >= 0.35: est_pct = 0.95
+            if v >= 1.0: est_pct = 0.50
+            elif v >= 0.85: est_pct = 0.60
+            elif v >= 0.70: est_pct = 0.70
+            elif v >= 0.55: est_pct = 0.80
+            elif v >= 0.40: est_pct = 0.85
+            elif v >= 0.30: est_pct = 0.90
+            elif v >= 0.20: est_pct = 0.95
             else: est_pct = 1.0
             
-            final_pct = max(0.40, min(est_pct + SHIFT, 1.0))
+            final_pct = max(0.35, min(est_pct + SHIFT, 1.0))
             est_1rm = st.session_state.last_weight / final_pct
             st.markdown(f'<div class="est-card">🟡 <b>{profile.upper()} 1RM EST.</b><br><span style="font-size: 2.2em; color: #FFC107;">{est_1rm:.1f}</span></div>', unsafe_allow_html=True)
