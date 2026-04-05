@@ -74,7 +74,6 @@ if not st.session_state.tracking_done:
                 cx, cy = st.session_state.coords; tracker = cv2.TrackerCSRT_create()
                 orig_cx, orig_cy = int(cx * scale_factor), int(cy * scale_factor)
                 
-                # FIX: Shrink the tracking box so it doesn't anchor to the background rack
                 box_size = int(40 * scale_factor)
                 tracker.init(first_frame, (orig_cx - box_size//2, orig_cy - box_size//2, box_size, box_size))
                 
@@ -103,10 +102,18 @@ if not st.session_state.tracking_done:
                     if not is_moving and v > 0.15: is_moving, start_f = True, i
                     elif is_moving and v <= 0:
                         end_f = i
-                        if (y_hist_orig[start_f] - y_hist_orig[end_f]) * m_per_px > 0.08:
+                        
+                        # --- THE UNRACK / WALKOUT FILTER ---
+                        dy = (y_hist_orig[start_f] - y_hist_orig[end_f]) * m_per_px # Vertical travel
+                        dx = abs(x_hist_orig[start_f] - x_hist_orig[end_f]) * m_per_px # Horizontal travel
+                        
+                        # Rule 1: Must travel up by at least 0.08m (3.1 inches)
+                        # Rule 2: Cannot be overwhelmingly horizontal (dx must be less than 1.5x dy)
+                        if dy > 0.08 and dx < (dy * 1.5):
                             x_coords = x_hist_orig[start_f:end_f+1]
                             drift_m = (max(x_coords) - min(x_coords)) * m_per_px
                             rep_data.append({"id": len(rep_data)+1, "start": start_f, "end": end_f, "avg_v": np.mean(v_smooth[start_f:end_f+1]), "dur": (end_f - start_f)/fps, "drift": drift_m})
+                        
                         is_moving = False
                 
                 if rep_data and "Profiler" in tracking_mode: st.session_state.workout_log.append({"weight": st.session_state.last_weight, "velocity": max([r['avg_v'] for r in rep_data])})
