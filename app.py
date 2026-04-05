@@ -27,16 +27,14 @@ if 'clicked' not in st.session_state: st.session_state.clicked = False
 if 'tracking_done' not in st.session_state: st.session_state.tracking_done = False
 if 'workout_log' not in st.session_state: st.session_state.workout_log = []
 if 'last_weight' not in st.session_state: st.session_state.last_weight = 0.0
+# NEW: Uploader key to force reset the file uploader
+if 'uploader_key' not in st.session_state: st.session_state.uploader_key = 0
 
 with st.sidebar:
     st.header("⚙️ App Settings")
     tracking_mode = st.radio("Mode:", ["⚡ Quick Track", "📈 1RM Profiler"])
     st.markdown("---")
-    st.subheader("👤 Lifter Profile")
-    profile = st.select_slider("Select your 'Feel':", options=["Grinder", "Standard", "Explosive"], value="Standard")
-    
-    adj_map = {"Explosive": -0.15, "Standard": 0.0, "Grinder": 0.05}
-    SHIFT = adj_map[profile]
+    st.info("💡 **Pro-Tip:** Shoot from a direct side angle and ensure the camera is stable for the most accurate physics tracking.")
 
 # --- UPLOAD PHASE ---
 if not st.session_state.tracking_done:
@@ -45,7 +43,12 @@ if not st.session_state.tracking_done:
         weight_in = st.number_input("Weight (lbs/kg)", min_value=0.0, value=st.session_state.last_weight, step=5.0)
         st.session_state.last_weight = weight_in
     with col_u:
-        uploaded_file = st.file_uploader("Upload MP4 or MOV", type=["mp4", "mov"])
+        # NEW: Injecting the dynamic key into the uploader
+        uploaded_file = st.file_uploader("Upload MP4 or MOV", type=["mp4", "mov"], key=f"uploader_{st.session_state.uploader_key}")
+        
+        if not uploaded_file:
+            st.markdown("### 👋 Welcome to the Lab")
+            st.markdown("1. Enter the weight on the bar.\n2. Upload a video of your set.\n3. Click the plate to extract your data.")
 
     if uploaded_file and (st.session_state.last_weight > 0 or "Quick" in tracking_mode):
         tpath = os.path.join(tempfile.gettempdir(), "input.mp4")
@@ -60,7 +63,8 @@ if not st.session_state.tracking_done:
             first_frame_res = cv2.resize(frame_rgb, (display_w, int(display_w * (orig_h / orig_w))))
             
             if not st.session_state.clicked:
-                st.markdown("### 🎯 Step 1: Click the Barbell Edge")
+                st.markdown("### 🎯 Step 1: Lock the Target")
+                st.caption("Click the center of the barbell plate to begin AI tracking.")
                 value = streamlit_image_coordinates(first_frame_res, key="clicker")
                 if value:
                     gray = cv2.cvtColor(first_frame_res, cv2.COLOR_RGB2GRAY)
@@ -74,12 +78,14 @@ if not st.session_state.tracking_done:
                 cx, cy = st.session_state.coords; tracker = cv2.TrackerCSRT_create()
                 orig_cx, orig_cy = int(cx * scale_factor), int(cy * scale_factor)
                 
-                # Sniper Box (40px) to prevent rack tracking
                 box_size = int(40 * scale_factor)
                 tracker.init(first_frame, (orig_cx - box_size//2, orig_cy - box_size//2, box_size, box_size))
                 
                 x_hist_orig, y_hist_orig, bboxes_orig, frames_display = [], [], [], []
-                cap.set(cv2.CAP_PROP_POS_FRAMES, 0); progress = st.progress(0)
+                cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                
+                status_box = st.info("⏳ Analyzing Biomechanics... Please hold.")
+                progress = st.progress(0)
                 
                 for i in range(total_frames):
                     ret, frame = cap.read()
@@ -93,6 +99,8 @@ if not st.session_state.tracking_done:
                     x_hist_orig.append(bx + bw//2); y_hist_orig.append(by + bh//2); bboxes_orig.append((bx, by, bw, bh))
                     frames_display.append(cv2.cvtColor(cv2.resize(frame, (display_w, int(display_w * (orig_h / orig_w)))), cv2.COLOR_BGR2RGB))
                     progress.progress((i + 1) / total_frames)
+                
+                status_box.empty()
 
                 m_per_px = 0.45 / bboxes_orig[0][3]
                 v_instant = [(y_hist_orig[j-1] - y_hist_orig[j]) * m_per_px * fps if j > 0 else 0 for j in range(len(y_hist_orig))]
@@ -103,13 +111,9 @@ if not st.session_state.tracking_done:
                     if not is_moving and v > 0.15: is_moving, start_f = True, i
                     elif is_moving and v <= 0:
                         end_f = i
+                        dy = (y_hist_orig[start_f] - y_hist_orig[end_f]) * m_per_px 
+                        dx = abs(x_hist_orig[start_f] - x_hist_orig[end_f]) * m_per_px 
                         
-                        # --- THE STRICT VECTOR FILTER ---
-                        dy = (y_hist_orig[start_f] - y_hist_orig[end_f]) * m_per_px # Vertical travel
-                        dx = abs(x_hist_orig[start_f] - x_hist_orig[end_f]) * m_per_px # Horizontal travel
-                        
-                        # 1. Bar must travel UP by at least 0.15m (6 inches) to eliminate unrack jumps
-                        # 2. Vertical travel (dy) MUST be greater than horizontal travel (dx)
                         if dy > 0.15 and dx < dy:
                             x_coords = x_hist_orig[start_f:end_f+1]
                             drift_m = (max(x_coords) - min(x_coords)) * m_per_px
@@ -142,7 +146,14 @@ if st.session_state.tracking_done:
     c1, c2 = st.columns([2, 1.5])
     with c1:
         st.video(st.session_state.final_vid_path)
-        if st.button("🔄 Track New Set"): st.session_state.clicked = False; st.session_state.tracking_done = False; st.rerun()
+        
+        # NEW: The reset button now increments the uploader_key to clear the ghost file
+        if st.button("🔄 Track New Set"): 
+            st.session_state.clicked = False
+            st.session_state.tracking_done = False
+            st.session_state.uploader_key += 1 
+            st.rerun()
+            
     with c2:
         st.subheader("📊 Performance Data")
         
@@ -161,7 +172,7 @@ if st.session_state.tracking_done:
             
             if len(st.session_state.rep_data) > 1:
                 v_loss = (1 - (v_last / v_max)) * 100
-                multiplier = 0.12 if profile == "Explosive" else 0.10 if profile == "Standard" else 0.08
+                multiplier = 0.10 
                 est_rpe = 5.5 + (v_loss * multiplier)
                 sub_text = f"{v_loss:.1f}% Velocity Loss"
             else:
@@ -170,7 +181,6 @@ if st.session_state.tracking_done:
                 elif v_max >= 0.50: est_rpe = 8.0
                 elif v_max >= 0.40: est_rpe = 9.0
                 else: est_rpe = 10.0
-                est_rpe -= (SHIFT * 10)
                 sub_text = "Single-Rep Proximity"
 
             final_rpe = min(10.0, round(est_rpe * 2) / 2)
@@ -187,6 +197,6 @@ if st.session_state.tracking_done:
                 elif v >= 0.20: est_pct = 0.95
                 else: est_pct = 1.0
                 
-                final_pct = max(0.35, min(est_pct + SHIFT, 1.0))
+                final_pct = max(0.35, min(est_pct, 1.0))
                 est_1rm = st.session_state.last_weight / final_pct
-                st.markdown(f'<div class="est-card">🟡 <b>{profile.upper()} 1RM EST.</b><br><span style="font-size: 2.2em; color: #FFC107;">{est_1rm:.1f}</span></div>', unsafe_allow_html=True)
+                st.markdown(f'<div class="est-card">🟡 <b>1RM EST.</b><br><span style="font-size: 2.2em; color: #FFC107;">{est_1rm:.1f}</span></div>', unsafe_allow_html=True)
