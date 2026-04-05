@@ -21,6 +21,12 @@ st.markdown("""
 
 st.title("🏋️ TheStrengthBenderSystem")
 
+# --- SIDEBAR & STATE ---
+if 'clicked' not in st.session_state: st.session_state.clicked = False
+if 'tracking_done' not in st.session_state: st.session_state.tracking_done = False
+if 'workout_log' not in st.session_state: st.session_state.workout_log = []
+if 'last_weight' not in st.session_state: st.session_state.last_weight = 0.0
+
 with st.sidebar:
     st.header("⚙️ App Settings")
     tracking_mode = st.radio("Mode:", ["⚡ Quick Track", "📈 1RM Profiler"])
@@ -29,22 +35,19 @@ with st.sidebar:
     profile = st.select_slider("Select your 'Feel':", options=["Grinder", "Standard", "Explosive"], value="Standard")
     
     # Profile Adjustments (Percentage Shifts)
-    # Explosive lifters are USUALLY at a lower % of max at high speeds
-    adj_map = {"Explosive": -0.07, "Standard": 0.0, "Grinder": 0.07}
+    adj_map = {"Explosive": -0.10, "Standard": 0.0, "Grinder": 0.10}
     SHIFT = adj_map[profile]
 
-if 'clicked' not in st.session_state: st.session_state.clicked = False
-if 'tracking_done' not in st.session_state: st.session_state.tracking_done = False
-if 'workout_log' not in st.session_state: st.session_state.workout_log = []
-
+# --- UPLOAD PHASE ---
 if not st.session_state.tracking_done:
     col_w, col_u = st.columns([1, 2])
     with col_w:
-        weight_lifted = st.number_input("Weight (Optional for Quick)", min_value=0.0, value=0.0, step=5.0)
+        weight_in = st.number_input("Weight (lbs/kg)", min_value=0.0, value=st.session_state.last_weight, step=5.0)
+        st.session_state.last_weight = weight_in
     with col_u:
         uploaded_file = st.file_uploader("Upload MP4 or MOV", type=["mp4", "mov"])
 
-    if uploaded_file and (weight_lifted > 0 or "Quick" in tracking_mode):
+    if uploaded_file and (st.session_state.last_weight > 0 or "Quick" in tracking_mode):
         tpath = os.path.join(tempfile.gettempdir(), "input.mp4")
         with open(tpath, "wb") as f: f.write(uploaded_file.read())
         cap = cv2.VideoCapture(tpath); fps = cap.get(cv2.CAP_PROP_FPS); total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
@@ -92,7 +95,7 @@ if not st.session_state.tracking_done:
                             drift_m = (max(x_coords) - min(x_coords)) * m_per_px
                             rep_data.append({"id": len(rep_data)+1, "start": start_f, "end": end_f, "avg_v": np.mean(v_smooth[start_f:end_f+1]), "dur": (end_f - start_f)/fps, "drift": drift_m})
                         is_moving = False
-                if rep_data and "Profiler" in tracking_mode: st.session_state.workout_log.append({"weight": weight_lifted, "velocity": max([r['avg_v'] for r in rep_data])})
+                if rep_data and "Profiler" in tracking_mode: st.session_state.workout_log.append({"weight": st.session_state.last_weight, "velocity": max([r['avg_v'] for r in rep_data])})
 
                 path_pts_disp, out_frames = [], []
                 for i, f in enumerate(frames_display):
@@ -110,8 +113,9 @@ if not st.session_state.tracking_done:
                     out_frames.append(f)
 
                 final_p = os.path.join(tempfile.gettempdir(), "out.mp4"); imageio.mimsave(final_p, out_frames, fps=fps, codec='libx264')
-                st.session_state.rep_data, st.session_state.final_vid_path, st.session_state.last_weight, st.session_state.tracking_done = rep_data, final_p, weight_lifted, True; st.rerun()
+                st.session_state.rep_data, st.session_state.final_vid_path, st.session_state.tracking_done = rep_data, final_p, True; st.rerun()
 
+# --- DASHBOARD PHASE ---
 if st.session_state.tracking_done:
     c1, c2 = st.columns([2, 1.5])
     with c1:
@@ -125,20 +129,19 @@ if st.session_state.tracking_done:
             grade = "ELITE" if drift_in < 2 else "STABLE" if drift_in < 4 else "LEAKAGE"
             st.markdown(f'<div class="form-card">⚖️ <b>FORM GRADE: {grade}</b><br>Horizontal Drift: {drift_in:.1f} inches</div>', unsafe_allow_html=True)
         
-        if weight_lifted > 0 and "Quick" in tracking_mode:
+        if st.session_state.last_weight > 0 and "Quick" in tracking_mode:
             v = max([r['avg_v'] for r in st.session_state.rep_data])
-            
-            # SCIENTIFIC CURVE MAPPING (Lookup table)
-            if v >= 1.0: est_pct = 0.60
-            elif v >= 0.85: est_pct = 0.70
+            # Lookup Map (Badillo Study Base)
+            if v >= 1.0: est_pct = 0.58
+            elif v >= 0.85: est_pct = 0.65
             elif v >= 0.70: est_pct = 0.75
             elif v >= 0.55: est_pct = 0.82
             elif v >= 0.45: est_pct = 0.90
             elif v >= 0.35: est_pct = 0.95
             else: est_pct = 1.0
             
-            # Apply Lifter Profile Shift
-            est_pct = max(0.40, min(est_pct + SHIFT, 1.0))
-            est_1rm = weight_lifted / est_pct
+            # Use SHIFT correctly - Explosive lifters are at a LOWER % of max at high speeds
+            final_pct = max(0.40, min(est_pct + SHIFT, 1.0))
+            est_1rm = st.session_state.last_weight / final_pct
             
             st.markdown(f'<div class="est-card">🟡 <b>{profile.upper()} 1RM EST.</b><br><span style="font-size: 2.2em; color: #FFC107;">{est_1rm:.1f}</span></div>', unsafe_allow_html=True)
