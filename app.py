@@ -42,14 +42,12 @@ if not st.session_state.tracking_done:
     col_w, col_u = st.columns([1, 2])
     
     with col_w:
-        # In Quick Track, weight is optional. In Profiler, it is required.
         label = "Weight (Optional)" if "Quick" in tracking_mode else "Weight (Required)"
         weight_lifted = st.number_input(label, min_value=0.0, value=0.0, step=5.0)
         
     with col_u:
         uploaded_file = st.file_uploader("Upload MP4 or MOV", type=["mp4", "mov"])
 
-    # Validation
     can_proceed = False
     if uploaded_file:
         if "Quick" in tracking_mode:
@@ -129,16 +127,24 @@ if not st.session_state.tracking_done:
                 if rep_data and "Profiler" in tracking_mode:
                     st.session_state.workout_log.append({"weight": weight_lifted, "velocity": max([r['avg_v'] for r in rep_data])})
 
-                # Video Baking
+                # --- NEW: DUAL-COLOR VIDEO BAKING & SMART HUD ---
                 path_pts_disp, out_frames = [], []
                 for i, f in enumerate(frames_display):
                     bx, by, bw, bh = [int(v / scale_factor) for v in bboxes_orig[i]]
                     path_pts_disp.append((bx+bw//2, by+bh//2))
                     active = next((r for r in rep_data if r['start'] <= i <= r['end']), None)
+                    
                     if len(path_pts_disp) > 1:
-                        for j in range(max(1, i-60), len(path_pts_disp)): cv2.line(f, path_pts_disp[j-1], path_pts_disp[j], (255, 75, 173), 2)
-                    cv2.rectangle(f, (0,0), (display_w, 50), (0,0,0), -1)
-                    cv2.putText(f, f"REP {active['id']} | {(i-active['start'])/fps:.2f}s" if active else "READY", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0,255,255), 2)
+                        for j in range(max(1, i-60), len(path_pts_disp)): 
+                            # If y is decreasing, the bar is moving UP (Concentric = Pink). Else DOWN (Eccentric = Cyan)
+                            color = (255, 75, 173) if path_pts_disp[j][1] < path_pts_disp[j-1][1] else (0, 255, 255)
+                            cv2.line(f, path_pts_disp[j-1], path_pts_disp[j], color, 2)
+                    
+                    # Clean HUD: Only draw text/box if an active rep is happening
+                    if active:
+                        cv2.rectangle(f, (0,0), (display_w, 50), (0,0,0), -1)
+                        cv2.putText(f, f"REP {active['id']} | {(i-active['start'])/fps:.2f}s", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0,255,255), 2)
+                    
                     out_frames.append(f)
 
                 final_p = os.path.join(tempfile.gettempdir(), "out.mp4")
@@ -170,7 +176,6 @@ if st.session_state.tracking_done:
     with c2:
         st.subheader("📊 Performance Data")
         
-        # --- LOGIC 1: QUICK TRACK 1RM (Optional) ---
         if "Quick" in tracking_mode:
             for r in st.session_state.rep_data:
                 st.markdown(f'<div class="rep-card"><b>REP {r["id"]}</b><br>{r["avg_v"]:.2f} m/s | {r["dur"]:.2f}s</div>', unsafe_allow_html=True)
@@ -180,7 +185,6 @@ if st.session_state.tracking_done:
                 est_pct = max(0.40, min(1.0 - ((best_v - 0.30) * 0.5), 1.0))
                 st.markdown(f'<div class="est-card">🟡 <b>QUICK 1RM EST.</b><br><span style="font-size: 2.2em; color: #FFC107;">{(st.session_state.last_weight / est_pct):.1f}</span></div>', unsafe_allow_html=True)
 
-        # --- LOGIC 2: PROFILER GRAPHING ---
         else:
             log = st.session_state.workout_log
             weights = [e['weight'] for e in log]
@@ -192,7 +196,6 @@ if st.session_state.tracking_done:
                 color = "#00E676" if slope < 0 else "#FFC107"
                 st.markdown(f'<div class="est-card">🟢 <b>BESPOKE 1RM</b><br><span style="font-size: 2.2em; color: {color};">{est_1rm:.1f}</span></div>', unsafe_allow_html=True)
                 
-                # Plotly Graph
                 fig = go.Figure()
                 fig.add_trace(go.Scatter(x=weights, y=velocities, mode='markers', name='Sets', marker=dict(color='#FF4BAD', size=12)))
                 if slope < 0:
@@ -203,5 +206,5 @@ if st.session_state.tracking_done:
                 fig.update_layout(plot_bgcolor='#0E1117', paper_bgcolor='#0E1117', font_color='white', xaxis_title="Weight", yaxis_title="m/s", margin=dict(l=10, r=10, t=10, b=10), showlegend=False)
                 st.plotly_chart(fig, use_container_width=True)
             else:
-                st.info("Log one more set to generate your custom curve.")
+                st.info("Log one more set (at a heavier weight) to generate your custom curve.")
                 for entry in log: st.markdown(f'<div class="log-card">{entry["weight"]} @ {entry["velocity"]:.2f} m/s</div>', unsafe_allow_html=True)
