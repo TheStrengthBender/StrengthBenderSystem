@@ -3,9 +3,9 @@ import cv2
 import imageio
 import numpy as np
 import tempfile
+import os
 from streamlit_image_coordinates import streamlit_image_coordinates
 
-# --- THE STRENGTH BENDER THEME ---
 st.set_page_config(page_title="TheStrengthBenderSystem", page_icon="🏋️", layout="wide")
 
 st.markdown("""
@@ -18,36 +18,33 @@ st.markdown("""
 
 st.title("🏋️ TheStrengthBenderSystem")
 
-# Fix for the "Infinite Click" loop
 if 'clicked' not in st.session_state:
     st.session_state.clicked = False
 
 uploaded_file = st.file_uploader("Upload Set (MP4 or MOV)", type=["mp4", "mov"])
 
 if uploaded_file is not None:
-    tfile = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4') 
-    tfile.write(uploaded_file.read())
-    tfile.flush()
-    video_path = tfile.name
+    # Use a fixed temp path for cloud compatibility
+    tpath = os.path.join(tempfile.gettempdir(), "input_vid.mp4")
+    with open(tpath, "wb") as f:
+        f.write(uploaded_file.read())
 
-    cap = cv2.VideoCapture(video_path)
+    cap = cv2.VideoCapture(tpath)
     fps = cap.get(cv2.CAP_PROP_FPS)
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
     
     ret, first_frame = cap.read()
     if ret:
         h, w = first_frame.shape[:2]
-        new_width = 400
-        new_height = int(new_width * (h / w))
-        if new_height % 2 != 0: new_height += 1
+        new_w, new_h = 400, int(400 * (h / w))
+        if new_h % 2 != 0: new_h += 1
         
         frame_rgb = cv2.cvtColor(first_frame, cv2.COLOR_BGR2RGB)
-        first_frame_resized = cv2.resize(frame_rgb, (new_width, new_height))
+        first_frame_res = cv2.resize(frame_rgb, (new_w, new_h))
 
-        # Only show the clicker if we haven't successfully processed a click yet
         if not st.session_state.clicked:
             st.markdown("### 🎯 Step 1: Click on the Barbell")
-            value = streamlit_image_coordinates(first_frame_resized, key="clicker_stable")
+            value = streamlit_image_coordinates(first_frame_res, key="clicker")
             if value:
                 st.session_state.coords = (value['x'], value['y'])
                 st.session_state.clicked = True
@@ -55,103 +52,89 @@ if uploaded_file is not None:
 
         if st.session_state.clicked:
             cx, cy = st.session_state.coords
-            first_frame_bgr = cv2.resize(first_frame, (new_width, new_height))
-            bbox = (cx - 25, cy - 25, 50, 50)
-            
-            st.info("Target Locked. Analyzing Set...")
+            tracker = cv2.TrackerCSRT_create()
+            # Tracker needs BGR
+            first_frame_bgr = cv2.resize(first_frame, (new_w, new_h))
+            tracker.init(first_frame_bgr, (cx-25, cy-25, 50, 50))
 
-            tracker = cv2.TrackerCSRT_create() 
-            tracker.init(first_frame_bgr, bbox)
-
-            y_history, bboxes, all_frames = [], [], []
+            y_hist, bboxes, frames = [], [], []
             cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
-            progress_bar = st.progress(0)
+            progress = st.progress(0)
             
             for i in range(total_frames):
                 ret, frame = cap.read()
                 if not ret: break
-                frame_res = cv2.resize(frame, (new_width, new_height))
-                success, box = tracker.update(frame_res)
-                bx, by, bw, bh = [int(v) for v in (box if success else bboxes[-1] if bboxes else bbox)]
-                y_history.append(by + (bh//2))
+                f_res = cv2.resize(frame, (new_w, new_h))
+                ok, box = tracker.update(f_res)
+                bx, by, bw, bh = [int(v) for v in (box if ok else bboxes[-1] if bboxes else (cx-25, cy-25, 50, 50))]
+                y_hist.append(by + bh//2)
                 bboxes.append((bx, by, bw, bh))
-                all_frames.append(frame_res)
-                progress_bar.progress((i + 1) / total_frames)
+                frames.append(cv2.cvtColor(f_res, cv2.COLOR_BGR2RGB))
+                progress.progress((i + 1) / total_frames)
 
-            # --- ROBUST HYBRID MATH (v8.0) ---
-            smoothed_y = [np.mean(y_history[max(0, i-5):min(len(y_history), i+5)]) for i in range(len(y_history))]
-            meters_per_pixel = 0.45 / bboxes[0][3]
+            # --- HYBRID REP ENGINE ---
+            smooth_y = [np.mean(y_hist[max(0, x-5):min(len(y_hist), x+5)]) for x in range(len(y_hist))]
+            m_per_px = 0.45 / bboxes[0][3]
             
-            # Identify all 'lowest' points
-            rep_starts = []
-            for i in range(15, len(smoothed_y) - 15):
-                if smoothed_y[i] == max(smoothed_y[i-15:i+16]):
-                    # Valid bottom if it's deep enough from the 'average' height
-                    if (smoothed_y[i] - min(smoothed_y)) > 25:
-                        if not rep_starts or (i - rep_starts[-1]) > (fps * 1.0):
-                            rep_starts.append(i)
-
             rep_data = []
-            for start in rep_starts:
-                search_range = smoothed_y[start:min(start + int(fps * 3), len(smoothed_y))]
-                end = start
-                for j in range(1, len(search_range)):
-                    # Precise Lockout Snap
-                    if search_range[j] >= search_range[j-1]:
-                        end = start + j
-                        break
-                
-                # Check displacement (Did it actually move?)
-                dist = (smoothed_y[start] - smoothed_y[end]) * meters_per_pixel
-                if dist > 0.15: # 15cm minimum for Trap Bar pulls
-                    rep_y = y_history[start:end+1]
-                    v_raw = [abs(rep_y[k-1] - rep_y[k]) * meters_per_pixel * fps for k in range(1, len(rep_y))]
-                    rep_data.append({
-                        "id": len(rep_data) + 1, "start": start, "end": end,
-                        "avg_v": np.mean(v_raw), "duration": (end - start) / fps
-                    })
+            # Find local maximums (bottom of reps)
+            for i in range(15, len(smooth_y)-15):
+                if smooth_y[i] == max(smooth_y[i-15:i+16]):
+                    # Check if bar actually moved
+                    if (smooth_y[i] - min(smooth_y)) > 20:
+                        start = i
+                        # Find Lockout
+                        search = smooth_y[start:start+int(fps*3)]
+                        end = start
+                        for j in range(1, len(search)):
+                            if search[j] >= search[j-1]: # Vertical speed hits 0
+                                end = start + j
+                                break
+                        
+                        dist = (smooth_y[start] - smooth_y[end]) * m_per_px
+                        if dist > 0.10: # Lowered for shallow trap bar starts
+                            if not rep_data or (start - rep_data[-1]['end']) > fps:
+                                r_y = y_hist[start:end+1]
+                                v = [abs(r_y[k-1]-r_y[k])*m_per_px*fps for k in range(1, len(r_y))]
+                                rep_data.append({"id": len(rep_data)+1, "start": start, "end": end, "avg_v": np.mean(v), "dur": (end-start)/fps})
 
-            # --- FINAL BAKE ---
-            col1, col2 = st.columns([3, 1])
-            with col2:
+            # --- FINAL OUTPUT ---
+            c1, c2 = st.columns([3, 1])
+            with c2:
                 st.subheader("📊 System Stats")
                 for r in rep_data:
-                    st.markdown(f'<div class="rep-card"><b>REP {r["id"]}</b><br>{r["avg_v"]:.2f} m/s | {r["duration"]:.2f}s</div>', unsafe_allow_html=True)
+                    st.markdown(f'<div class="rep-card"><b>REP {r["id"]}</b><br>{r["avg_v"]:.2f} m/s | {r["dur"]:.2f}s</div>', unsafe_allow_html=True)
                 if st.button("Reset System"):
                     st.session_state.clicked = False
                     st.rerun()
 
-            with col1:
-                with st.spinner("Baking Final Clip..."):
-                    out_frames, path_points = [], []
-                    for i in range(len(all_frames)):
-                        frame_draw = all_frames[i].copy()
-                        bx, by, bw, bh = bboxes[i]
-                        active_rep = next((r for r in rep_data if r['start'] <= i <= r['end']), None)
-                        path_points.append((bx + bw//2, by + bh//2))
-                        
-                        # Draw Path
-                        if len(path_points) > 1:
-                            for j in range(max(1, i-60), len(path_points)):
-                                cv2.line(frame_draw, path_points[j-1], path_points[j], (255, 75, 173), 2, cv2.LINE_AA)
+            with c1:
+                path_pts = []
+                out_frames = []
+                for i, f in enumerate(frames):
+                    bx, by, bw, bh = bboxes[i]
+                    path_pts.append((bx+bw//2, by+bh//2))
+                    active = next((r for r in rep_data if r['start'] <= i <= r['end']), None)
+                    
+                    # Draw Path
+                    if len(path_pts) > 1:
+                        for j in range(max(1, i-60), len(path_pts)):
+                            cv2.line(f, path_pts[j-1], path_pts[j], (255, 75, 173), 2)
+                    
+                    # HUD
+                    cv2.rectangle(f, (0,0), (new_w, 50), (0,0,0), -1)
+                    txt = f"REP {active['id']} | {(i-active['start'])/fps:.2f}s" if active else "STRENGTH BENDER READY"
+                    cv2.putText(f, txt, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0,255,255), 2)
+                    out_frames.append(f)
 
-                        # HUD
-                        cv2.rectangle(frame_draw, (0, 0), (new_width, 60), (0, 0, 0), -1)
-                        if active_rep:
-                            cv2.putText(frame_draw, f"REP {active_rep['id']} | {(i-active_rep['start'])/fps:.2f}s", (10, 35), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
-                        else:
-                            cv2.putText(frame_draw, "STRENGTH BENDER READY", (10, 35), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (150, 150, 150), 1)
-                        out_frames.append(cv2.cvtColor(frame_draw, cv2.COLOR_BGR2RGB))
+                # Summary End Card
+                if rep_data:
+                    card = np.zeros((new_h, new_w, 3), dtype=np.uint8)
+                    cv2.putText(card, "SYSTEM STATS", (100, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 75, 173), 2)
+                    for idx, r in enumerate(rep_data):
+                        cv2.putText(card, f"R{r['id']}: {r['dur']:.2f}s | {r['avg_v']:.2f}m/s", (50, 120 + idx*40), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255,255,255), 1)
+                    for _ in range(int(fps*3)): out_frames.append(card)
 
-                    # Final Summary Frame
-                    if rep_data:
-                        summary_frame = np.zeros((new_height, new_width, 3), dtype=np.uint8)
-                        cv2.putText(summary_frame, "THE STRENGTH BENDER", (40, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 75, 173), 2)
-                        y_off = 120
-                        for r in rep_data:
-                            cv2.putText(summary_frame, f"R{r['id']}: {r['duration']:.2f}s | {r['avg_v']:.2f}m/s", (40, y_off), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
-                            y_off += 40
-                        for _ in range(int(fps * 3)): out_frames.append(summary_frame)
-
-                    imageio.mimsave(tempfile.NamedTemporaryFile(delete=False, suffix='.mp4').name, out_frames, fps=fps, format='FFMPEG', codec='libx264')
-                    st.video(tempfile.NamedTemporaryFile(delete=False, suffix='.mp4').name)
+                final_p = os.path.join(tempfile.gettempdir(), "output_vid.mp4")
+                imageio.mimsave(final_p, out_frames, fps=fps, codec='libx264')
+                st.video(final_p)
