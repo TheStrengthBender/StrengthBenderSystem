@@ -72,17 +72,35 @@ if st.session_state.analysis_active and uploaded_file is not None:
                 meters_px = 0.45 / bboxes[0][3]
                 smoothed_y = [np.mean(y_hist[max(0, x-5):min(len(y_hist), x+5)]) for x in range(len(y_hist))]
                 reps = []
-                for i in range(15, len(smoothed_y)-15):
-                    if smoothed_y[i] == max(smoothed_y[i-15:i+16]) and (smoothed_y[i] - min(smoothed_y)) > 30:
-                        if not reps or (i - reps[-1]['start']) > fps:
-                            end = i
-                            for j in range(i+5, min(i+int(fps*3), len(smoothed_y))):
-                                if smoothed_y[j] >= smoothed_y[j-1]: 
-                                    end = j; break
+                # --- PRECISION REP SNAP-BACK (v5.0) ---
+            for i in range(15, len(smoothed_y) - 15):
+                # 1. DETECT THE HOLE (Bottom of Rep)
+                if smoothed_y[i] == max(smoothed_y[i-15:i+16]) and (smoothed_y[i] - min(smoothed_y)) > 30:
+                    if not reps or (i - reps[-1]['start']) > fps:
+                        
+                        # 2. DETECT THE LOCKOUT (Snap Logic)
+                        # We start checking almost immediately (i+2) to catch the turn-around
+                        end = i
+                        search_limit = min(i + int(fps * 3), len(smoothed_y))
+                        for j in range(i + 2, search_limit):
+                            # Stop the clock if the bar stops moving UP by even 0.5 pixels
+                            if smoothed_y[j] >= smoothed_y[j-1] - 0.5:
+                                end = j
+                                break
+                        
+                        # 3. VALIDATE & CALCULATE
+                        rep_y_segment = y_hist[i:end+1]
+                        # Only count it if the bar moved at least 20cm (filters out jitters)
+                        if (max(rep_y_segment) - min(rep_y_segment)) * meters_px > 0.2:
+                            v_raw = [abs(y_hist[k-1] - y_hist[k]) * meters_px * fps for k in range(i+1, end+1)]
                             
-                            v_raw = [abs(y_hist[k-1]-y_hist[k])*meters_px*fps for k in range(i, end+1)]
-                            if v_raw and (max(y_hist[i:end+1]) - min(y_hist[i:end+1]))*meters_px > 0.1:
-                                reps.append({"id": len(reps)+1, "start": i, "end": end, "avg": np.mean(v_raw)})
+                            reps.append({
+                                "id": len(reps) + 1, 
+                                "start": i, 
+                                "end": end, 
+                                "avg": np.mean(v_raw),
+                                "peak": max(v_raw) if v_raw else 0 # Added peak velocity back in
+                            })
 
                 status.update(label="✅ Analysis Complete. Baking Video...", state="complete")
 
