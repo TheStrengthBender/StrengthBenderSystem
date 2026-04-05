@@ -74,7 +74,8 @@ if not st.session_state.tracking_done:
                 cx, cy = st.session_state.coords; tracker = cv2.TrackerCSRT_create()
                 orig_cx, orig_cy = int(cx * scale_factor), int(cy * scale_factor)
                 
-                box_size = int(70 * scale_factor)
+                # FIX: Shrink the tracking box so it doesn't anchor to the background rack
+                box_size = int(40 * scale_factor)
                 tracker.init(first_frame, (orig_cx - box_size//2, orig_cy - box_size//2, box_size, box_size))
                 
                 x_hist_orig, y_hist_orig, bboxes_orig, frames_display = [], [], [], []
@@ -102,7 +103,6 @@ if not st.session_state.tracking_done:
                     if not is_moving and v > 0.15: is_moving, start_f = True, i
                     elif is_moving and v <= 0:
                         end_f = i
-                        # FIX: Lowered ROM threshold from 0.15 to 0.08 (approx 3.1 inches) to catch elite bench arches
                         if (y_hist_orig[start_f] - y_hist_orig[end_f]) * m_per_px > 0.08:
                             x_coords = x_hist_orig[start_f:end_f+1]
                             drift_m = (max(x_coords) - min(x_coords)) * m_per_px
@@ -138,7 +138,6 @@ if st.session_state.tracking_done:
     with c2:
         st.subheader("📊 Performance Data")
         
-        # --- SAFEGUARD: ONLY RUN MATH IF REPS DETECTED ---
         if not st.session_state.rep_data:
             st.warning("⚠️ No completed reps detected. Ensure the bar moved upwards at least 3 inches, or try a different video.")
         else:
@@ -148,7 +147,6 @@ if st.session_state.tracking_done:
                 grade = "ELITE" if drift_in < 2 else "STABLE" if drift_in < 4 else "LEAKAGE"
                 st.markdown(f'<div class="form-card">⚖️ <b>FORM GRADE: {grade}</b><br>Drift: {drift_in:.1f} inches</div>', unsafe_allow_html=True)
             
-            # --- RPE ENGINE ---
             v_list = [r['avg_v'] for r in st.session_state.rep_data]
             v_max = max(v_list)
             v_last = v_list[-1]
@@ -170,7 +168,6 @@ if st.session_state.tracking_done:
             final_rpe = min(10.0, round(est_rpe * 2) / 2)
             st.markdown(f'<div class="rpe-card"><span style="color: #8B949E; font-size: 0.9em;">ESTIMATED INTENSITY</span><br><span style="font-size: 2.2em; font-weight: 800; color: white;">RPE {final_rpe}</span><br><span style="color: #FF4BAD; font-size: 0.8em;">{sub_text}</span></div>', unsafe_allow_html=True)
 
-            # --- REFINED 1RM SCIENTIFIC TABLE ---
             if st.session_state.last_weight > 0 and "Quick" in tracking_mode:
                 v = v_max
                 if v >= 1.0: est_pct = 0.50
