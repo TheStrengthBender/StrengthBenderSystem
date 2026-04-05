@@ -4,3 +4,4 @@ streamlit-image-coordinates
 numpy
 imageio
 imageio-ffmpeg
+plotly
