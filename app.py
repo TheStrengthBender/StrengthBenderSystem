@@ -12,7 +12,7 @@ st.set_page_config(page_title="TheStrengthBenderSystem", page_icon="🏋️", la
 st.markdown("""
     <style>
     .stApp { background-color: #0E1117; color: #E0E0E0; }
-    h1 { color: #E0E0E0 !important; font-family: 'Helvetica Neue', sans-serif; font-weight: 800; font-size: clamp(1.5rem, 5vw, 2.5rem) !important; word-break: keep-all !important; }
+    h1 { color: #E0E0E0 !important; font-family: 'Helvetica Neue', sans-serif; font-weight: 800; font-size: clamp(1.5rem, 5vw, 2.5rem) !important; }
     .rep-card { background-color: #161B22; padding: 12px; border-radius: 8px; border-left: 4px solid #FF4BAD; margin-bottom: 8px; color: white; }
     .form-card { background-color: #1E252D; padding: 12px; border-radius: 8px; border-left: 4px solid #00E5FF; margin-bottom: 8px; color: white; }
     .est-card { background-color: #2D241E; padding: 20px; border-radius: 10px; border-left: 5px solid #FFC107; margin-top: 15px; color: white; text-align: center; }
@@ -36,7 +36,6 @@ with st.sidebar:
     profile = st.select_slider("Select your 'Feel':", options=["Grinder", "Standard", "Explosive"], value="Standard")
     
     # Profile shifts for 1RM and RPE calculations
-    # Negative shift = Conservative (Explosive), Positive = Aggressive (Grinder)
     adj_map = {"Explosive": -0.10, "Standard": 0.0, "Grinder": 0.08}
     SHIFT = adj_map[profile]
 
@@ -58,6 +57,7 @@ if not st.session_state.tracking_done:
             orig_h, orig_w = first_frame.shape[:2]; display_w = 400; scale_factor = orig_w / display_w
             frame_rgb = cv2.cvtColor(first_frame, cv2.COLOR_BGR2RGB)
             first_frame_res = cv2.resize(frame_rgb, (display_w, int(display_w * (orig_h / orig_w))))
+            
             if not st.session_state.clicked:
                 st.markdown("### 🎯 Step 1: Click the Barbell Edge")
                 value = streamlit_image_coordinates(first_frame_res, key="clicker")
@@ -71,15 +71,27 @@ if not st.session_state.tracking_done:
 
             if st.session_state.clicked:
                 cx, cy = st.session_state.coords; tracker = cv2.TrackerCSRT_create()
-                orig_cx, orig_cy = int(cx * scale_factor), int(cy * scale_factor); box_size = int(50 * scale_factor)
+                orig_cx, orig_cy = int(cx * scale_factor), int(cy * scale_factor)
+                
+                # Robust Box Size for high-impact lifts
+                box_size = int(70 * scale_factor)
                 tracker.init(first_frame, (orig_cx - box_size//2, orig_cy - box_size//2, box_size, box_size))
+                
                 x_hist_orig, y_hist_orig, bboxes_orig, frames_display = [], [], [], []
                 cap.set(cv2.CAP_PROP_POS_FRAMES, 0); progress = st.progress(0)
+                
+                # Tracking Loop with Lazarus Logic
                 for i in range(total_frames):
                     ret, frame = cap.read()
                     if not ret: break
                     ok, box = tracker.update(frame)
-                    bx, by, bw, bh = [int(v) for v in (box if ok else bboxes_orig[-1])]
+                    
+                    if ok:
+                        bx, by, bw, bh = [int(v) for v in box]
+                    else:
+                        # Hold position if tracking is lost (impact blur)
+                        bx, by, bw, bh = bboxes_orig[-1] if bboxes_orig else (orig_cx - box_size//2, orig_cy - box_size//2, box_size, box_size)
+                    
                     x_hist_orig.append(bx + bw//2); y_hist_orig.append(by + bh//2); bboxes_orig.append((bx, by, bw, bh))
                     frames_display.append(cv2.cvtColor(cv2.resize(frame, (display_w, int(display_w * (orig_h / orig_w)))), cv2.COLOR_BGR2RGB))
                     progress.progress((i + 1) / total_frames)
@@ -87,6 +99,7 @@ if not st.session_state.tracking_done:
                 m_per_px = 0.45 / bboxes_orig[0][3]
                 v_instant = [(y_hist_orig[j-1] - y_hist_orig[j]) * m_per_px * fps if j > 0 else 0 for j in range(len(y_hist_orig))]
                 v_smooth = [np.mean(v_instant[max(0, x-3):min(len(v_instant), x+3)]) for x in range(len(v_instant))]
+                
                 rep_data, is_moving, start_f = [], False, 0
                 for i, v in enumerate(v_smooth):
                     if not is_moving and v > 0.15: is_moving, start_f = True, i
@@ -97,6 +110,7 @@ if not st.session_state.tracking_done:
                             drift_m = (max(x_coords) - min(x_coords)) * m_per_px
                             rep_data.append({"id": len(rep_data)+1, "start": start_f, "end": end_f, "avg_v": np.mean(v_smooth[start_f:end_f+1]), "dur": (end_f - start_f)/fps, "drift": drift_m})
                         is_moving = False
+                
                 if rep_data and "Profiler" in tracking_mode: st.session_state.workout_log.append({"weight": st.session_state.last_weight, "velocity": max([r['avg_v'] for r in rep_data])})
 
                 path_pts_disp, out_frames = [], []
@@ -137,29 +151,24 @@ if st.session_state.tracking_done:
             v_max = max(v_list)
             v_last = v_list[-1]
             
-            # Case 1: Multi-Rep Set (Velocity Loss Method)
             if len(st.session_state.rep_data) > 1:
                 v_loss = (1 - (v_last / v_max)) * 100
                 multiplier = 0.12 if profile == "Explosive" else 0.10 if profile == "Standard" else 0.08
                 est_rpe = 5.5 + (v_loss * multiplier)
                 sub_text = f"{v_loss:.1f}% Velocity Loss"
-            
-            # Case 2: Single Rep (Proximity to MVT Method)
             else:
-                # Map speed to RPE based on typical proximity to failure
                 if v_max >= 0.80: est_rpe = 6.0
                 elif v_max >= 0.65: est_rpe = 7.0
                 elif v_max >= 0.50: est_rpe = 8.0
                 elif v_max >= 0.40: est_rpe = 9.0
                 else: est_rpe = 10.0
-                # Shift based on profile (Explosive lifters feel heavy weight as higher RPE)
                 est_rpe -= (SHIFT * 10)
                 sub_text = "Single-Rep Proximity"
 
             final_rpe = min(10.0, round(est_rpe * 2) / 2)
             st.markdown(f'<div class="rpe-card"><span style="color: #8B949E; font-size: 0.9em;">ESTIMATED INTENSITY</span><br><span style="font-size: 2.2em; font-weight: 800; color: white;">RPE {final_rpe}</span><br><span style="color: #FF4BAD; font-size: 0.8em;">{sub_text}</span></div>', unsafe_allow_html=True)
 
-        # --- 1RM ESTIMATE ---
+        # --- 1RM ESTIMATE (SCIENTIFIC TABLE) ---
         if st.session_state.last_weight > 0 and "Quick" in tracking_mode:
             v = v_max
             if v >= 1.0: est_pct = 0.58
