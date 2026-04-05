@@ -37,9 +37,19 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-st.markdown("<h1>IRON SIGHT</h1>", unsafe_allow_html=True)
-st.markdown("<p style='text-align: center; color: #8B949E; margin-bottom: 30px;'>TACTICAL VELOCITY TRACKER</p>", unsafe_allow_html=True)
+# --- LOGO & HEADER ---
+# We use columns to perfectly center the logo on the screen
+col_spacer1, col_logo, col_spacer2 = st.columns([1, 1, 1])
 
+with col_logo:
+    try:
+        # This looks for the image file you just saved
+        st.image("logo.png", use_container_width=True)
+    except FileNotFoundError:
+        # Fallback just in case the image gets moved
+        st.markdown("<h1>IRON SIGHT</h1>", unsafe_allow_html=True)
+
+st.markdown("<p style='text-align: center; color: #8B949E; margin-bottom: 30px; letter-spacing: 2px;'>TACTICAL VELOCITY TRACKER</p>", unsafe_allow_html=True)
 # --- INITIALIZE STATE ---
 if 'clicked' not in st.session_state: st.session_state.clicked = False
 if 'tracking_done' not in st.session_state: st.session_state.tracking_done = False
