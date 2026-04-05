@@ -129,7 +129,7 @@ if uploaded_file is not None:
                     st.session_state.clicked = False
                     st.rerun()
 
-               with c1:
+            with c1:
                 path_pts_disp, out_frames = [], []
                 for i, f in enumerate(frames_display):
                     bx, by, bw, bh = [int(v / scale_factor) for v in bboxes_orig[i]]
