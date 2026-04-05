@@ -35,8 +35,8 @@ with st.sidebar:
         help="Explosive: High speed on warmups, sharp drop-off. Grinder: Constant speed, slow but strong."
     )
     
-    # Map profile to math coefficients
-    sensitivity_map = {"Grinder": 0.4, "Standard": 0.55, "Explosive": 0.75}
+    # Map profile to math coefficients (Higher = Faster %1RM drop per m/s)
+    sensitivity_map = {"Grinder": 0.35, "Standard": 0.50, "Explosive": 0.85}
     SENSITIVITY = sensitivity_map[profile]
 
 # --- SESSION STATE ---
@@ -138,16 +138,9 @@ if st.session_state.tracking_done:
         
         if st.session_state.last_weight > 0 and "Quick" in tracking_mode:
             best_v = max([r['avg_v'] for r in st.session_state.rep_data])
-            # --- CORRECTED MATH ENGINE ---
-# Instead of 1.0 - (v * SENS), we use an Exponential or steeper Linear drop
-# For Explosive lifters, 1.0 m/s should represent ~60% of max, not 80%.
-            
-# Calculate how much 'Reserve Velocity' you have above the fail point (0.30)
-velocity_reserve = best_v - 0.30
-
-# Apply the profile: Explosive lifters lose %1RM much faster per m/s
-est_pct = 1.0 - (velocity_reserve * SENSITIVITY)
-
-# Final Safeguard: Ensure the %1RM doesn't go below 30% for crazy fast reps
-est_pct = max(0.30, est_pct)
-est_1rm = st.session_state.last_weight / est_pct
+            # CORRECTED MATH LOGIC
+            velocity_reserve = max(0, best_v - 0.30)
+            est_pct = 1.0 - (velocity_reserve * SENSITIVITY)
+            est_pct = max(0.35, est_pct)
+            est_1rm = st.session_state.last_weight / est_pct
+            st.markdown(f'<div class="est-card">🟡 <b>{profile.upper()} 1RM EST.</b><br><span style="font-size: 2.2em; color: #FFC107;">{est_1rm:.1f}</span></div>', unsafe_allow_html=True)
