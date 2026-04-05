@@ -20,7 +20,7 @@ st.markdown("""
 
 st.title("🏋️ StrengthBender Pro")
 
-uploaded_file = st.file_uploader("Upload Set (MP4)", type=["mp4"])
+uploaded_file = st.file_uploader("Upload Set (MP4 or MOV)", type=["mp4", "mov"])
 
 # If a new file is uploaded, reset the state
 if uploaded_file:
