@@ -35,8 +35,6 @@ with st.sidebar:
     st.subheader("👤 Lifter Profile")
     profile = st.select_slider("Select your 'Feel':", options=["Grinder", "Standard", "Explosive"], value="Standard")
     
-    # RECALIBRATED SHIFTS: 
-    # Explosive -0.15 allows for much higher 1RM estimates at low speeds.
     adj_map = {"Explosive": -0.15, "Standard": 0.0, "Grinder": 0.05}
     SHIFT = adj_map[profile]
 
@@ -55,7 +53,9 @@ if not st.session_state.tracking_done:
         cap = cv2.VideoCapture(tpath); fps = cap.get(cv2.CAP_PROP_FPS); total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
         ret, first_frame = cap.read()
         if ret:
-            orig_h, orig_w = first_frame.shape[:2]; display_w = 400; scale_factor = orig_w / display_w
+            orig_h, orig_w = first_frame.shape[:2]
+            display_w = 320 
+            scale_factor = orig_w / display_w
             frame_rgb = cv2.cvtColor(first_frame, cv2.COLOR_BGR2RGB)
             first_frame_res = cv2.resize(frame_rgb, (display_w, int(display_w * (orig_h / orig_w))))
             
@@ -102,7 +102,7 @@ if not st.session_state.tracking_done:
                     if not is_moving and v > 0.15: is_moving, start_f = True, i
                     elif is_moving and v <= 0:
                         end_f = i
-                        if (y_hist_orig[start_f] - y_hist_orig[end_f]) * m_per_px > 0.30:
+                        if (y_hist_orig[start_f] - y_hist_orig[end_f]) * m_per_px > 0.15:
                             x_coords = x_hist_orig[start_f:end_f+1]
                             drift_m = (max(x_coords) - min(x_coords)) * m_per_px
                             rep_data.append({"id": len(rep_data)+1, "start": start_f, "end": end_f, "avg_v": np.mean(v_smooth[start_f:end_f+1]), "dur": (end_f - start_f)/fps, "drift": drift_m})
@@ -136,14 +136,18 @@ if st.session_state.tracking_done:
         if st.button("🔄 Track New Set"): st.session_state.clicked = False; st.session_state.tracking_done = False; st.rerun()
     with c2:
         st.subheader("📊 Performance Data")
-        for r in st.session_state.rep_data:
-            st.markdown(f'<div class="rep-card"><b>REP {r["id"]}</b><br>{r["avg_v"]:.2f} m/s | {r["dur"]:.2f}s</div>', unsafe_allow_html=True)
-            drift_in = r['drift'] * 39.37
-            grade = "ELITE" if drift_in < 2 else "STABLE" if drift_in < 4 else "LEAKAGE"
-            st.markdown(f'<div class="form-card">⚖️ <b>FORM GRADE: {grade}</b><br>Drift: {drift_in:.1f} inches</div>', unsafe_allow_html=True)
         
-        # --- RPE ENGINE ---
-        if st.session_state.rep_data:
+        # --- SAFEGUARD: ONLY RUN MATH IF REPS DETECTED ---
+        if not st.session_state.rep_data:
+            st.warning("⚠️ No completed reps detected. Ensure the bar moved upwards at least 6 inches, or try a different video.")
+        else:
+            for r in st.session_state.rep_data:
+                st.markdown(f'<div class="rep-card"><b>REP {r["id"]}</b><br>{r["avg_v"]:.2f} m/s | {r["dur"]:.2f}s</div>', unsafe_allow_html=True)
+                drift_in = r['drift'] * 39.37
+                grade = "ELITE" if drift_in < 2 else "STABLE" if drift_in < 4 else "LEAKAGE"
+                st.markdown(f'<div class="form-card">⚖️ <b>FORM GRADE: {grade}</b><br>Drift: {drift_in:.1f} inches</div>', unsafe_allow_html=True)
+            
+            # --- RPE ENGINE ---
             v_list = [r['avg_v'] for r in st.session_state.rep_data]
             v_max = max(v_list)
             v_last = v_list[-1]
@@ -165,18 +169,18 @@ if st.session_state.tracking_done:
             final_rpe = min(10.0, round(est_rpe * 2) / 2)
             st.markdown(f'<div class="rpe-card"><span style="color: #8B949E; font-size: 0.9em;">ESTIMATED INTENSITY</span><br><span style="font-size: 2.2em; font-weight: 800; color: white;">RPE {final_rpe}</span><br><span style="color: #FF4BAD; font-size: 0.8em;">{sub_text}</span></div>', unsafe_allow_html=True)
 
-        # --- REFINED 1RM SCIENTIFIC TABLE (v19) ---
-        if st.session_state.last_weight > 0 and "Quick" in tracking_mode:
-            v = v_max
-            if v >= 1.0: est_pct = 0.50
-            elif v >= 0.85: est_pct = 0.60
-            elif v >= 0.70: est_pct = 0.70
-            elif v >= 0.55: est_pct = 0.80
-            elif v >= 0.40: est_pct = 0.85
-            elif v >= 0.30: est_pct = 0.90
-            elif v >= 0.20: est_pct = 0.95
-            else: est_pct = 1.0
-            
-            final_pct = max(0.35, min(est_pct + SHIFT, 1.0))
-            est_1rm = st.session_state.last_weight / final_pct
-            st.markdown(f'<div class="est-card">🟡 <b>{profile.upper()} 1RM EST.</b><br><span style="font-size: 2.2em; color: #FFC107;">{est_1rm:.1f}</span></div>', unsafe_allow_html=True)
+            # --- REFINED 1RM SCIENTIFIC TABLE ---
+            if st.session_state.last_weight > 0 and "Quick" in tracking_mode:
+                v = v_max
+                if v >= 1.0: est_pct = 0.50
+                elif v >= 0.85: est_pct = 0.60
+                elif v >= 0.70: est_pct = 0.70
+                elif v >= 0.55: est_pct = 0.80
+                elif v >= 0.40: est_pct = 0.85
+                elif v >= 0.30: est_pct = 0.90
+                elif v >= 0.20: est_pct = 0.95
+                else: est_pct = 1.0
+                
+                final_pct = max(0.35, min(est_pct + SHIFT, 1.0))
+                est_1rm = st.session_state.last_weight / final_pct
+                st.markdown(f'<div class="est-card">🟡 <b>{profile.upper()} 1RM EST.</b><br><span style="font-size: 2.2em; color: #FFC107;">{est_1rm:.1f}</span></div>', unsafe_allow_html=True)
