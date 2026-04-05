@@ -7,21 +7,38 @@ import os
 import plotly.graph_objects as go
 from streamlit_image_coordinates import streamlit_image_coordinates
 
-st.set_page_config(page_title="TheStrengthBenderSystem", page_icon="🏋️", layout="wide")
+st.set_page_config(page_title="IRON SIGHT", page_icon="🎯", layout="wide")
 
+# --- CUSTOM CSS: THE IRON SIGHT AESTHETIC ---
 st.markdown("""
     <style>
-    .stApp { background-color: #0E1117; color: #E0E0E0; }
-    h1 { color: #E0E0E0 !important; font-family: 'Helvetica Neue', sans-serif; font-weight: 800; font-size: clamp(1.5rem, 5vw, 2.5rem) !important; }
-    .rep-card { background-color: #161B22; padding: 12px; border-radius: 8px; border-left: 4px solid #FF4BAD; margin-bottom: 8px; color: white; }
-    .form-card { background-color: #1E252D; padding: 12px; border-radius: 8px; border-left: 4px solid #00E5FF; margin-bottom: 8px; color: white; }
-    .est-card { background-color: #2D241E; padding: 20px; border-radius: 10px; border-left: 5px solid #FFC107; margin-top: 15px; color: white; text-align: center; }
-    .rpe-card { background-color: #1c1f26; padding: 15px; border-radius: 10px; text-align: center; border-bottom: 1px solid #30363d; height: 100%; }
-    .warning-text { color: #FFC107; font-weight: bold; font-size: 0.9em; text-align: center; margin-top: -10px; margin-bottom: 15px; }
+    /* Main Background */
+    .stApp { background-color: #1A1C20; color: #FFFFFF; font-family: 'Inter', 'Roboto', sans-serif; }
+    
+    /* Header Typography */
+    h1 { color: #FFFFFF !important; font-weight: 900; font-size: clamp(2rem, 6vw, 3rem) !important; text-align: center; letter-spacing: 2px; text-transform: uppercase; margin-bottom: 0px;}
+    
+    /* Tactical Cards */
+    .rep-card { background-color: #2D3139; padding: 15px; border-radius: 8px; border-left: 4px solid #E63946; margin-bottom: 10px; color: white; }
+    .form-card { background-color: #2D3139; padding: 15px; border-radius: 8px; border-left: 4px solid #8B949E; margin-bottom: 10px; color: white; }
+    
+    /* Stats Row (Red & Green Top Strokes) */
+    .stat-card-red { background-color: #2D3139; padding: 20px; border-radius: 8px; border-top: 4px solid #E63946; text-align: center; height: 100%; box-shadow: 0 4px 6px rgba(0,0,0,0.3); }
+    .stat-card-green { background-color: #2D3139; padding: 20px; border-radius: 8px; border-top: 4px solid #00FF00; text-align: center; height: 100%; box-shadow: 0 4px 6px rgba(0,0,0,0.3); }
+    
+    /* Adjusted 1RM Card */
+    .est-card-gold { background-color: #2D3139; padding: 20px; border-radius: 8px; border-left: 5px solid #FFC107; margin-top: 15px; color: white; text-align: center; box-shadow: 0 4px 6px rgba(0,0,0,0.3); }
+    
+    /* Warning Text */
+    .warning-text { color: #E63946; font-weight: bold; font-size: 0.9em; text-align: center; margin-top: -10px; margin-bottom: 15px; }
+    
+    /* Sidebar styling to match */
+    [data-testid="stSidebar"] { background-color: #121316; }
     </style>
     """, unsafe_allow_html=True)
 
-st.title("🏋️ TheStrengthBenderSystem")
+st.markdown("<h1>IRON SIGHT</h1>", unsafe_allow_html=True)
+st.markdown("<p style='text-align: center; color: #8B949E; margin-bottom: 30px;'>TACTICAL VELOCITY TRACKER</p>", unsafe_allow_html=True)
 
 # --- INITIALIZE STATE ---
 if 'clicked' not in st.session_state: st.session_state.clicked = False
@@ -40,7 +57,7 @@ with st.sidebar:
 if not st.session_state.tracking_done:
     col_w, col_u = st.columns([1, 2])
     with col_w:
-        weight_in = st.number_input("Weight (lbs/kg)", min_value=0.0, value=st.session_state.last_weight, step=5.0)
+        weight_in = st.number_input("Weight on Bar (lbs)", min_value=0.0, value=st.session_state.last_weight, step=5.0)
         st.session_state.last_weight = weight_in
     with col_u:
         uploaded_file = st.file_uploader("Upload MP4 or MOV", type=["mp4", "mov"], key=f"uploader_{st.session_state.uploader_key}")
@@ -73,7 +90,7 @@ if not st.session_state.tracking_done:
             click_to_track_ratio = track_w / display_w
             
             if not st.session_state.clicked:
-                st.markdown("### 🎯 Step 1: Lock the Target")
+                st.markdown("### 🎯 Lock the Target")
                 st.caption("Click the center of the barbell plate to begin AI tracking.")
                 value = streamlit_image_coordinates(first_frame_res, key="clicker")
                 if value:
@@ -96,7 +113,7 @@ if not st.session_state.tracking_done:
                 x_hist_orig, y_hist_orig, bboxes_orig, frames_display = [], [], [], []
                 cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
                 
-                status_box = st.info("⚡ Analyzing Biomechanics at Turbo Speed...")
+                status_box = st.info("⚡ Tracking Engaged. Analyzing Biomechanics...")
                 st.markdown('<div class="warning-text">⚠️ Do not close or minimize the app while processing!</div>', unsafe_allow_html=True)
                 progress = st.progress(0)
                 
@@ -136,7 +153,6 @@ if not st.session_state.tracking_done:
                         dy = (y_hist_orig[start_f] - y_hist_orig[end_f]) * m_per_px 
                         dx = abs(x_hist_orig[start_f] - x_hist_orig[end_f]) * m_per_px 
                         
-                        # Unrack Filter (6 inches vertical, more vertical than horizontal)
                         if dy > 0.15 and dx < dy:
                             x_coords = x_hist_orig[start_f:end_f+1]
                             drift_m = (max(x_coords) - min(x_coords)) * m_per_px
@@ -157,12 +173,13 @@ if not st.session_state.tracking_done:
                     active = next((r for r in rep_data if r['start'] <= orig_idx <= r['end']), None)
                     if len(path_pts_disp) > 1:
                         for j in range(max(1, i-30), len(path_pts_disp)):
-                            color = (255, 75, 173) if path_pts_disp[j][1] < path_pts_disp[j-1][1] else (0, 255, 255)
+                            # Terminal Green tracking lines
+                            color = (0, 255, 0) if path_pts_disp[j][1] < path_pts_disp[j-1][1] else (255, 255, 255)
                             cv2.line(f, path_pts_disp[j-1], path_pts_disp[j], color, 2)
                     if active:
                         cv2.line(f, (path_pts_disp[active['start']//2][0], 0), (path_pts_disp[active['start']//2][0], f.shape[0]), (255,255,255), 1, cv2.LINE_AA)
                         cv2.rectangle(f, (0,0), (display_w, 50), (0,0,0), -1)
-                        cv2.putText(f, f"REP {active['id']} | {(orig_idx-active['start'])/fps:.2f}s", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0,255,255), 2)
+                        cv2.putText(f, f"REP {active['id']} | {(orig_idx-active['start'])/fps:.2f}s", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0,255,0), 2)
                     out_frames.append(f)
 
                 final_p = os.path.join(tempfile.gettempdir(), "out.mp4"); imageio.mimsave(final_p, out_frames, fps=display_fps, codec='libx264')
@@ -174,7 +191,7 @@ if st.session_state.tracking_done:
     with c1:
         st.video(st.session_state.final_vid_path)
         
-        if st.button("🔄 Track New Set"): 
+        if st.button("🔄 TRACK NEW SET", use_container_width=True): 
             st.session_state.clicked = False
             st.session_state.tracking_done = False
             st.session_state.uploader_key += 1 
@@ -223,22 +240,20 @@ if st.session_state.tracking_done:
             else:
                 ai_1rm = st.session_state.last_weight * (36.0 / (37.0 - ai_effective_reps))
 
-            # UI: Side-by-Side AI Cards
+            # UI: Side-by-Side Iron Sight Cards
             rc1, rc2 = st.columns(2)
             with rc1:
-                st.markdown(f'<div class="rpe-card" style="border-top: 4px solid #FF4BAD;"><span style="color: #8B949E; font-size: 0.8em; font-weight: bold;">AI RPE</span><br><span style="font-size: 2.2em; font-weight: 800; color: white;">{final_rpe}</span><br><span style="color: #FF4BAD; font-size: 0.75em;">{sub_text}</span></div>', unsafe_allow_html=True)
+                st.markdown(f'<div class="stat-card-red"><span style="color: #8B949E; font-size: 0.8em; font-weight: bold;">AI RPE</span><br><span style="font-size: 2.2em; font-weight: 900; color: white;">{final_rpe}</span><br><span style="color: #E63946; font-size: 0.75em;">{sub_text}</span></div>', unsafe_allow_html=True)
             with rc2:
-                st.markdown(f'<div class="rpe-card" style="border-top: 4px solid #00E5FF;"><span style="color: #8B949E; font-size: 0.8em; font-weight: bold;">AI 1RM EST</span><br><span style="font-size: 2.2em; font-weight: 800; color: #00E5FF;">{ai_1rm:.1f}</span><br><span style="color: #8B949E; font-size: 0.75em;">Brzycki Hybrid</span></div>', unsafe_allow_html=True)
+                st.markdown(f'<div class="stat-card-green"><span style="color: #8B949E; font-size: 0.8em; font-weight: bold;">EST 1RM</span><br><span style="font-size: 2.2em; font-weight: 900; color: #00FF00;">{ai_1rm:.1f}</span><br><span style="color: #8B949E; font-size: 0.75em;">Brzycki Hybrid</span></div>', unsafe_allow_html=True)
 
             # --- MANUAL OVERRIDE ---
             if st.session_state.last_weight > 0 and "Quick" in tracking_mode:
                 st.markdown("<br>", unsafe_allow_html=True)
-                st.markdown("### 🎛️ Manual Override")
-                st.caption("Did the set feel heavier or lighter? Adjust the RPE below to recalculate your true max.")
+                st.markdown("### 🎛️ Adjust Perceived RPE")
                 
-                user_rpe = st.slider("Your Perceived RPE:", min_value=5.0, max_value=10.0, value=float(safe_rpe), step=0.5)
+                user_rpe = st.slider("", min_value=5.0, max_value=10.0, value=float(safe_rpe), step=0.5, label_visibility="collapsed")
                 
-                # Only show the adjusted card if the user moves the slider away from the AI's guess
                 if user_rpe != final_rpe:
                     user_rir = 10.0 - user_rpe
                     user_effective_reps = reps_performed + user_rir
@@ -248,4 +263,4 @@ if st.session_state.tracking_done:
                     else:
                         user_1rm = st.session_state.last_weight * (36.0 / (37.0 - user_effective_reps))
                     
-                    st.markdown(f'<div class="est-card" style="border-left: 5px solid #FFC107; background-color: #2D241E;"><span style="color: #8B949E; font-size: 0.9em;">YOUR ADJUSTED 1RM</span><br><span style="font-size: 2.6em; color: #FFC107; font-weight: 900;">{user_1rm:.1f} lbs</span></div>', unsafe_allow_html=True)
+                    st.markdown(f'<div class="est-card-gold"><span style="color: #8B949E; font-size: 0.9em; font-weight: bold;">ADJUSTED 1RM</span><br><span style="font-size: 2.6em; color: #FFC107; font-weight: 900;">{user_1rm:.1f} lbs</span></div>', unsafe_allow_html=True)
