@@ -102,7 +102,8 @@ if not st.session_state.tracking_done:
                     if not is_moving and v > 0.15: is_moving, start_f = True, i
                     elif is_moving and v <= 0:
                         end_f = i
-                        if (y_hist_orig[start_f] - y_hist_orig[end_f]) * m_per_px > 0.15:
+                        # FIX: Lowered ROM threshold from 0.15 to 0.08 (approx 3.1 inches) to catch elite bench arches
+                        if (y_hist_orig[start_f] - y_hist_orig[end_f]) * m_per_px > 0.08:
                             x_coords = x_hist_orig[start_f:end_f+1]
                             drift_m = (max(x_coords) - min(x_coords)) * m_per_px
                             rep_data.append({"id": len(rep_data)+1, "start": start_f, "end": end_f, "avg_v": np.mean(v_smooth[start_f:end_f+1]), "dur": (end_f - start_f)/fps, "drift": drift_m})
@@ -139,7 +140,7 @@ if st.session_state.tracking_done:
         
         # --- SAFEGUARD: ONLY RUN MATH IF REPS DETECTED ---
         if not st.session_state.rep_data:
-            st.warning("⚠️ No completed reps detected. Ensure the bar moved upwards at least 6 inches, or try a different video.")
+            st.warning("⚠️ No completed reps detected. Ensure the bar moved upwards at least 3 inches, or try a different video.")
         else:
             for r in st.session_state.rep_data:
                 st.markdown(f'<div class="rep-card"><b>REP {r["id"]}</b><br>{r["avg_v"]:.2f} m/s | {r["dur"]:.2f}s</div>', unsafe_allow_html=True)
