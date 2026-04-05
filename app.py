@@ -74,6 +74,7 @@ if not st.session_state.tracking_done:
                 cx, cy = st.session_state.coords; tracker = cv2.TrackerCSRT_create()
                 orig_cx, orig_cy = int(cx * scale_factor), int(cy * scale_factor)
                 
+                # Sniper Box (40px) to prevent rack tracking
                 box_size = int(40 * scale_factor)
                 tracker.init(first_frame, (orig_cx - box_size//2, orig_cy - box_size//2, box_size, box_size))
                 
@@ -103,13 +104,13 @@ if not st.session_state.tracking_done:
                     elif is_moving and v <= 0:
                         end_f = i
                         
-                        # --- THE UNRACK / WALKOUT FILTER ---
+                        # --- THE STRICT VECTOR FILTER ---
                         dy = (y_hist_orig[start_f] - y_hist_orig[end_f]) * m_per_px # Vertical travel
                         dx = abs(x_hist_orig[start_f] - x_hist_orig[end_f]) * m_per_px # Horizontal travel
                         
-                        # Rule 1: Must travel up by at least 0.08m (3.1 inches)
-                        # Rule 2: Cannot be overwhelmingly horizontal (dx must be less than 1.5x dy)
-                        if dy > 0.08 and dx < (dy * 1.5):
+                        # 1. Bar must travel UP by at least 0.15m (6 inches) to eliminate unrack jumps
+                        # 2. Vertical travel (dy) MUST be greater than horizontal travel (dx)
+                        if dy > 0.15 and dx < dy:
                             x_coords = x_hist_orig[start_f:end_f+1]
                             drift_m = (max(x_coords) - min(x_coords)) * m_per_px
                             rep_data.append({"id": len(rep_data)+1, "start": start_f, "end": end_f, "avg_v": np.mean(v_smooth[start_f:end_f+1]), "dur": (end_f - start_f)/fps, "drift": drift_m})
@@ -146,7 +147,7 @@ if st.session_state.tracking_done:
         st.subheader("📊 Performance Data")
         
         if not st.session_state.rep_data:
-            st.warning("⚠️ No completed reps detected. Ensure the bar moved upwards at least 3 inches, or try a different video.")
+            st.warning("⚠️ No completed reps detected. Ensure the bar moved upwards at least 6 inches, or try a different video.")
         else:
             for r in st.session_state.rep_data:
                 st.markdown(f'<div class="rep-card"><b>REP {r["id"]}</b><br>{r["avg_v"]:.2f} m/s | {r["dur"]:.2f}s</div>', unsafe_allow_html=True)
