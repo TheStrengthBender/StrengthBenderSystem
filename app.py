@@ -21,13 +21,30 @@ st.markdown("""
 
 st.title("🏋️ TheStrengthBenderSystem")
 
+# --- SIDEBAR CONFIGURATION ---
+with st.sidebar:
+    st.header("⚙️ App Settings")
+    tracking_mode = st.radio("Mode:", ["⚡ Quick Track", "📈 1RM Profiler"])
+    
+    st.markdown("---")
+    st.subheader("👤 Lifter Profile")
+    profile = st.select_slider(
+        "Select your 'Feel':",
+        options=["Grinder", "Standard", "Explosive"],
+        value="Standard",
+        help="Explosive: High speed on warmups, sharp drop-off. Grinder: Constant speed, slow but strong."
+    )
+    
+    # Map profile to math coefficients
+    sensitivity_map = {"Grinder": 0.4, "Standard": 0.55, "Explosive": 0.75}
+    SENSITIVITY = sensitivity_map[profile]
+
+# --- SESSION STATE ---
 if 'clicked' not in st.session_state: st.session_state.clicked = False
 if 'tracking_done' not in st.session_state: st.session_state.tracking_done = False
 if 'workout_log' not in st.session_state: st.session_state.workout_log = []
 
-tracking_mode = st.radio("Select Mode:", ["⚡ Quick Track", "📈 1RM Profiler"], horizontal=True)
-st.markdown("---")
-
+# --- UPLOAD PHASE ---
 if not st.session_state.tracking_done:
     col_w, col_u = st.columns([1, 2])
     with col_w:
@@ -81,7 +98,6 @@ if not st.session_state.tracking_done:
                     elif is_moving and v <= 0:
                         end_f = i
                         if (y_hist_orig[start_f] - y_hist_orig[end_f]) * m_per_px > 0.30:
-                            # --- X-DRIFT MATH ---
                             x_coords = x_hist_orig[start_f:end_f+1]
                             drift_m = (max(x_coords) - min(x_coords)) * m_per_px
                             rep_data.append({"id": len(rep_data)+1, "start": start_f, "end": end_f, "avg_v": np.mean(v_smooth[start_f:end_f+1]), "dur": (end_f - start_f)/fps, "drift": drift_m})
@@ -98,7 +114,6 @@ if not st.session_state.tracking_done:
                             color = (255, 75, 173) if path_pts_disp[j][1] < path_pts_disp[j-1][1] else (0, 255, 255)
                             cv2.line(f, path_pts_disp[j-1], path_pts_disp[j], color, 2)
                     if active:
-                        # Draw Perfect Vertical Reference (Shadow Path)
                         cv2.line(f, (path_pts_disp[active['start']][0], 0), (path_pts_disp[active['start']][0], f.shape[0]), (255,255,255), 1, cv2.LINE_AA)
                         cv2.rectangle(f, (0,0), (display_w, 50), (0,0,0), -1)
                         cv2.putText(f, f"REP {active['id']} | DRIFT: {active['drift']*39.37:.1f}in", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0,229,255), 2)
@@ -107,6 +122,7 @@ if not st.session_state.tracking_done:
                 final_p = os.path.join(tempfile.gettempdir(), "out.mp4"); imageio.mimsave(final_p, out_frames, fps=fps, codec='libx264')
                 st.session_state.rep_data, st.session_state.final_vid_path, st.session_state.last_weight, st.session_state.tracking_done = rep_data, final_p, weight_lifted, True; st.rerun()
 
+# --- DASHBOARD PHASE ---
 if st.session_state.tracking_done:
     c1, c2 = st.columns([2, 1.5])
     with c1:
@@ -116,11 +132,13 @@ if st.session_state.tracking_done:
         st.subheader("📊 Performance Data")
         for r in st.session_state.rep_data:
             st.markdown(f'<div class="rep-card"><b>REP {r["id"]}</b><br>{r["avg_v"]:.2f} m/s | {r["dur"]:.2f}s</div>', unsafe_allow_html=True)
-            # DRIFT GRADE
             drift_in = r['drift'] * 39.37
             grade = "ELITE" if drift_in < 2 else "STABLE" if drift_in < 4 else "LEAKAGE"
             st.markdown(f'<div class="form-card">⚖️ <b>FORM GRADE: {grade}</b><br>Horizontal Drift: {drift_in:.1f} inches</div>', unsafe_allow_html=True)
+        
         if st.session_state.last_weight > 0 and "Quick" in tracking_mode:
             best_v = max([r['avg_v'] for r in st.session_state.rep_data])
-            est_1rm = st.session_state.last_weight / max(0.40, min(1.0 - ((best_v - 0.30) * 0.5), 1.0))
-            st.markdown(f'<div class="est-card">🟡 <b>1RM EST.</b><br><span style="font-size: 2.2em; color: #FFC107;">{est_1rm:.1f}</span></div>', unsafe_allow_html=True)
+            # APPLY THE NEW CALIBRATED MATH
+            est_pct = max(0.35, min(1.0 - ((best_v - 0.30) * SENSITIVITY), 1.0))
+            est_1rm = st.session_state.last_weight / est_pct
+            st.markdown(f'<div class="est-card">🟡 <b>{profile.upper()} 1RM EST.</b><br><span style="font-size: 2.2em; color: #FFC107;">{est_1rm:.1f}</span></div>', unsafe_allow_html=True)
