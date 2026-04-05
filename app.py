@@ -129,17 +129,27 @@ if uploaded_file is not None:
                     st.session_state.clicked = False
                     st.rerun()
 
-            with c1:
+           with c1:
                 path_pts_disp, out_frames = [], []
                 for i, f in enumerate(frames_display):
-                    # Convert high-res box back to display-res for drawing
                     bx, by, bw, bh = [int(v / scale_factor) for v in bboxes_orig[i]]
                     path_pts_disp.append((bx+bw//2, by+bh//2))
                     active = next((r for r in rep_data if r['start'] <= i <= r['end']), None)
                     
                     if len(path_pts_disp) > 1:
-                        for j in range(max(1, i-60), len(path_pts_disp)):
-                            cv2.line(f, path_pts_disp[j-1], path_pts_disp[j], (255, 75, 173), 2)
+                        # --- PERSISTENT DUAL-COLOR PATH ---
+                        # Anchor the line to the start of the rep, or use a short tail if just resting
+                        draw_start = active['start'] if active else max(1, i - 30)
+                        
+                        for j in range(max(1, draw_start), len(path_pts_disp)):
+                            # OpenCV Y-axis goes DOWN. If current Y > prev Y, bar is descending.
+                            if path_pts_disp[j][1] > path_pts_disp[j-1][1]:
+                                path_color = (255, 255, 0) # Cyan for Descent (Eccentric)
+                            else:
+                                path_color = (255, 75, 173) # Pink for Ascent (Concentric)
+                                
+                            # Added LINE_AA for a smoother, less pixelated path
+                            cv2.line(f, path_pts_disp[j-1], path_pts_disp[j], path_color, 2, cv2.LINE_AA)
                     
                     cv2.rectangle(f, (0,0), (display_w, 50), (0,0,0), -1)
                     txt = f"REP {active['id']} | {(i-active['start'])/fps:.2f}s" if active else "STRENGTH BENDER READY"
