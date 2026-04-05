@@ -37,19 +37,10 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# --- LOGO & HEADER ---
-# We use columns to perfectly center the logo on the screen
-col_spacer1, col_logo, col_spacer2 = st.columns([1, 1, 1])
-
-with col_logo:
-    try:
-        # This looks for the image file you just saved
-        st.image("logo.png", use_container_width=True)
-    except FileNotFoundError:
-        # Fallback just in case the image gets moved
-        st.markdown("<h1>IRON SIGHT</h1>", unsafe_allow_html=True)
-
+# --- CLEAN TEXT HEADER ---
+st.markdown("<h1>IRON SIGHT</h1>", unsafe_allow_html=True)
 st.markdown("<p style='text-align: center; color: #8B949E; margin-bottom: 30px; letter-spacing: 2px;'>TACTICAL VELOCITY TRACKER</p>", unsafe_allow_html=True)
+
 # --- INITIALIZE STATE ---
 if 'clicked' not in st.session_state: st.session_state.clicked = False
 if 'tracking_done' not in st.session_state: st.session_state.tracking_done = False
@@ -183,7 +174,6 @@ if not st.session_state.tracking_done:
                     active = next((r for r in rep_data if r['start'] <= orig_idx <= r['end']), None)
                     if len(path_pts_disp) > 1:
                         for j in range(max(1, i-30), len(path_pts_disp)):
-                            # Terminal Green tracking lines
                             color = (0, 255, 0) if path_pts_disp[j][1] < path_pts_disp[j-1][1] else (255, 255, 255)
                             cv2.line(f, path_pts_disp[j-1], path_pts_disp[j], color, 2)
                     if active:
@@ -274,3 +264,10 @@ if st.session_state.tracking_done:
                         user_1rm = st.session_state.last_weight * (36.0 / (37.0 - user_effective_reps))
                     
                     st.markdown(f'<div class="est-card-gold"><span style="color: #8B949E; font-size: 0.9em; font-weight: bold;">ADJUSTED 1RM</span><br><span style="font-size: 2.6em; color: #FFC107; font-weight: 900;">{user_1rm:.1f} lbs</span></div>', unsafe_allow_html=True)
+
+# --- WATERMARK ---
+st.markdown("""
+    <div style="position: fixed; bottom: 15px; right: 20px; color: #595959; font-size: 0.75em; font-weight: 800; letter-spacing: 1px; z-index: 100;">
+        BY THE STRENGTHBENDER
+    </div>
+    """, unsafe_allow_html=True)
