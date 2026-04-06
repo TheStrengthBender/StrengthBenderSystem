@@ -23,6 +23,9 @@ st.markdown("""
     .card { background-color: #161B22; border: 1px solid #30363d; padding: 20px; border-radius: 12px; margin-bottom: 10px; }
     .stat-label { color: #8B949E; font-size: 0.8em; text-transform: uppercase; font-weight: 700; display: block; }
     .stat-value { font-size: 2.2em; font-weight: 900; color: #FFFFFF; }
+    
+    /* Expander styling for the Archive */
+    .streamlit-expanderHeader { background-color: #161B22 !important; border-radius: 8px; font-weight: 700; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -52,14 +55,14 @@ with tab1:
             fps = cap.get(cv2.CAP_PROP_FPS)
             total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
             
-            # --- LONG SET OPTIMIZATION ENGINE ---
+            # --- LOCKED PHYSICS ENGINE ---
             video_length_sec = total_frames / fps
             if video_length_sec > 45:
-                frame_step = 3  # Ultra-endurance mode for 1-minute+ videos
+                frame_step = 3  
             elif video_length_sec > 15:
-                frame_step = 2  # Standard multi-rep mode
+                frame_step = 2  
             else:
-                frame_step = 1  # High-fidelity single-rep mode
+                frame_step = 1  
             
             ret, first_frame = cap.read()
             if ret:
@@ -70,7 +73,7 @@ with tab1:
                 
                 if not st.session_state.clicked:
                     if video_length_sec > 20:
-                        st.info(f"Long Set Detected ({round(video_length_sec)}s). Engine optimized for deep breathing periods.")
+                        st.info(f"Long Set Detected ({round(video_length_sec)}s). Engine optimized.")
                     st.markdown("### 🎯 Set Reference Point")
                     value = streamlit_image_coordinates(cv2.cvtColor(first_frame_res, cv2.COLOR_BGR2RGB), key="clicker")
                     if value:
@@ -102,7 +105,6 @@ with tab1:
                         frames_out.append(cv2.cvtColor(cv2.resize(frame, (display_w, display_h)), cv2.COLOR_BGR2RGB))
                         progress.progress(i / total_frames)
                     
-                    # --- PATIENT REP DETECTION LOGIC ---
                     m_per_px = 0.45 / bboxes[0][3]
                     v_instant = [(y_hist[j-1]-y_hist[j])*m_per_px*(fps/frame_step) if j>0 else 0 for j in range(len(y_hist))]
                     v_smooth = [np.mean(v_instant[max(0, k-3):min(len(v_instant), k+3)]) for k in range(len(v_instant))]
@@ -112,16 +114,12 @@ with tab1:
                     start_idx = 0
 
                     for i, v in enumerate(v_smooth):
-                        # Start rep if moving up
                         if not is_moving and v > 0.1: 
                             is_moving, start_idx = True, i
-                        
-                        # End rep when bar settles
                         elif is_moving and v < 0:
                             duration = (i - start_idx) / (fps/frame_step)
                             peak_v = max(v_smooth[start_idx:i])
                             
-                            # Filter: Must be a real pull, not a wiggle
                             if duration > 0.4 and peak_v > 0.12:
                                 rep_x = x_hist[start_idx:i]
                                 rep_drift_in = (max(rep_x) - min(rep_x)) * m_per_px * 39.37
@@ -157,42 +155,75 @@ with tab1:
         actual_reps = len(res["reps"])
         
         if actual_reps == 0:
-            st.error("No valid reps detected. Ensure clear bar path and clean lighting.")
+            st.error("No valid reps detected.")
         else:
-            # Display Rep Stats
             for idx, r in enumerate(res["reps"]):
                 st.markdown(f'<div class="card" style="border-left: 4px solid #FF1E56; padding: 10px 20px;">REP {idx+1}: {r["v"]} m/s | {r["dur"]}s</div>', unsafe_allow_html=True)
             
             grade = "STABLE" if res["drift"] < 4.5 else "LEAKAGE"
             st.markdown(f'<div class="card" style="border-left: 4px solid #00D2FF; padding: 10px 20px;">FORM GRADE: {grade} | Drift: {res["drift"]} in</div>', unsafe_allow_html=True)
 
-            # Display Detected Rep Count to verify the Math
             st.info(f"AI Detected: {actual_reps} Reps")
 
             st.markdown(f'<div class="card" style="text-align: center;"><span class="stat-label">AI SUGGESTED RPE</span><div class="stat-value">{res["ai_rpe"]}</div></div>', unsafe_allow_html=True)
             
-            # --- THE FIXED MATH LOGIC ---
+            # --- LOCKED MATH LOGIC ---
             user_rpe = st.slider("Manual Override", 5.0, 10.0, float(res["ai_rpe"]), 0.5)
+            effective_reps = actual_reps + (10.0 - user_rpe)
             
-            # Effective Reps = Actual Reps + Reps in Reserve
-            rir = 10.0 - user_rpe
-            effective_reps = actual_reps + rir
-            
-            if effective_reps < 37:
-                adj_1rm = round(weight * (36 / (37 - effective_reps)), 1)
-            else:
-                adj_1rm = weight
+            adj_1rm = round(weight * (36 / (37 - effective_reps)), 1) if effective_reps < 37 else weight
             
             st.markdown(f'<div class="card" style="text-align: center; border-top: 4px solid #00D2FF;"><span class="stat-label">ADJUSTED 1RM EST</span><div class="stat-value" style="color:#00D2FF;">{adj_1rm}</div></div>', unsafe_allow_html=True)
 
-            if st.button("💾 SAVE TO VAULT", use_container_width=True):
-                supabase.table("lifts").insert({"exercise": exercise, "weight": weight, "reps": actual_reps, "rpe": user_rpe, "est_1rm": adj_1rm}).execute()
-                st.success("Set Archived."); st.session_state.tracking_done = False; st.session_state.clicked = False; st.session_state.uploader_key += 1; st.rerun()
+            # --- THE NEW DUAL ACTION BUTTONS ---
+            col_save, col_new = st.columns(2)
+            with col_save:
+                if st.button("💾 SAVE TO VAULT", use_container_width=True):
+                    with st.spinner("Uploading to Cloud Storage..."):
+                        # 1. Upload Video to Supabase Storage
+                        file_name = f"{exercise.replace(' ', '_')}_{datetime.now().strftime('%Y%m%d%H%M%S')}.mp4"
+                        with open(res["video"], "rb") as f:
+                            supabase.storage.from_("lift-videos").upload(file_name, f, {"content-type": "video/mp4"})
+                        
+                        # Get the public URL to watch it later
+                        video_url = supabase.storage.from_("lift-videos").get_public_url(file_name)
+
+                        # 2. Save Data & URL to Database
+                        supabase.table("lifts").insert({
+                            "exercise": exercise, 
+                            "weight": weight, 
+                            "reps": actual_reps, 
+                            "rpe": user_rpe, 
+                            "est_1rm": adj_1rm,
+                            "video_url": video_url  # New Column
+                        }).execute()
+                        
+                    st.success("Archived to Cloud.")
+                    st.session_state.tracking_done = False; st.session_state.clicked = False; st.session_state.uploader_key += 1; st.rerun()
+            
+            with col_new:
+                if st.button("🔄 TRACK NEW LIFT", use_container_width=True):
+                    st.session_state.tracking_done = False; st.session_state.clicked = False; st.session_state.uploader_key += 1; st.rerun()
 
 with tab2:
     st.subheader("🗄️ TACTICAL ARCHIVE")
     logs = supabase.table("lifts").select("*").order("created_at", desc=True).execute()
+    
     if logs.data:
         for row in logs.data:
-            st.markdown(f"**{row['exercise']}**: {row['weight']} lbs x {row['reps']} | RPE {row['rpe']} | 1RM {row['est_1rm']}")
-            st.markdown("---")
+            # Format the date nicely
+            date_obj = datetime.fromisoformat(row['created_at'].replace("Z", "+00:00"))
+            formatted_date = date_obj.strftime("%b %d, %Y")
+            
+            # The Expander gives a clean list that you can click to watch the video
+            with st.expander(f"**{row['exercise']}**: {row['weight']} lbs x {row['reps']} | RPE {row['rpe']} | 1RM {row['est_1rm']} 🎯"):
+                st.write(f"📅 Logged on: {formatted_date}")
+                
+                if row.get('video_url'):
+                    st.markdown('<div class="video-container">', unsafe_allow_html=True)
+                    st.video(row['video_url'])
+                    st.markdown('</div>', unsafe_allow_html=True)
+                else:
+                    st.info("No video attached to this log (Legacy Set).")
+
+st.markdown('<div style="position: fixed; bottom: 15px; right: 20px; color: #333; font-size: 0.7em; font-weight: 800;">BY THE STRENGTHBENDER</div>', unsafe_allow_html=True)
